@@ -1,0 +1,50 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  resource:
+    attributes:
+    - key: environment
+      value: docker
+      action: upsert
+
+exporters:
+  logging:
+    loglevel: debug
+    
+  # For local development, we'll use stdout
+  debug:
+    verbosity: detailed
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  pprof:
+    endpoint: 0.0.0.0:1777
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [logging, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [logging, debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [logging, debug]
