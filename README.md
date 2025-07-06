@@ -1,0 +1,2 @@
+# laravel12-otel-ec2-xray
+laravel12にotelを入れてec2で動かす。そのメトリクスをxrayに吐き出して確認できるようにする
