@@ -1,2 +1,244 @@
-# laravel12-otel-ec2-xray
-laravel12にotelを入れてec2で動かす。そのメトリクスをxrayに吐き出して確認できるようにする
+# Laravel 12 + OpenTelemetry + AWS X-Ray
+
+Laravel 12アプリケーションにOpenTelemetryを統合し、EC2上で動作させてAWS X-Rayでトレースを可視化するプロジェクトです。
+
+## 🎯 プロジェクト概要
+
+このプロジェクトは以下を実現します：
+
+- **Laravel 12** を使用したRESTful API（CRUD操作）
+- **OpenTelemetry** によるアプリケーションの計装（HTTP、データベース、ログ）
+- **AWS X-Ray** へのトレースデータ送信と可視化
+- **Docker Compose** による開発環境
+- **EC2** での本番環境デプロイ
+
+## 🏗️ アーキテクチャ
+
+### 本番環境（AWS）
+```
+User → EC2 (Nginx + Laravel) → OpenTelemetry → X-Ray Daemon → AWS X-Ray
+                ↓
+            RDS PostgreSQL
+```
+
+### 開発環境（Docker）
+```
+User → Nginx → Laravel → OpenTelemetry → OTel Collector → stdout
+         ↓
+    PostgreSQL (Docker)
+```
+
+## 🚀 クイックスタート
+
+### 前提条件
+
+- Docker & Docker Compose
+- PHP 8.3+ (ローカル開発の場合)
+- Composer (ローカル開発の場合)
+
+### 開発環境のセットアップ
+
+1. **リポジトリのクローン**
+   ```bash
+   git clone https://github.com/shimamorieiki/laravel12-otel-ec2-xray.git
+   cd laravel12-otel-ec2-xray
+   ```
+
+2. **環境設定**
+   ```bash
+   cp .env.docker .env
+   ```
+
+3. **Dockerコンテナの起動**
+   ```bash
+   make setup  # 初回のみ
+   make up     # 2回目以降
+   ```
+
+4. **動作確認**
+   ```bash
+   # ヘルスチェック
+   curl http://localhost/up
+
+   # Items API
+   curl http://localhost/api/items
+   ```
+
+## 📚 API仕様
+
+### Items CRUD API
+
+| メソッド | エンドポイント | 説明 |
+|---------|--------------|------|
+| GET | `/api/items` | 全アイテムの取得 |
+| GET | `/api/items/{id}` | 特定アイテムの取得 |
+| POST | `/api/items` | 新規アイテムの作成 |
+| PUT | `/api/items/{id}` | アイテムの更新 |
+| DELETE | `/api/items/{id}` | アイテムの削除 |
+
+#### リクエスト例
+
+```bash
+# アイテムの作成
+curl -X POST http://localhost/api/items \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "サンプル商品",
+    "description": "これはテスト商品です",
+    "price": 1980,
+    "quantity": 10
+  }'
+
+# アイテムの取得
+curl http://localhost/api/items
+
+# アイテムの更新
+curl -X PUT http://localhost/api/items/1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "quantity": 20
+  }'
+
+# アイテムの削除
+curl -X DELETE http://localhost/api/items/1
+```
+
+## 🔧 OpenTelemetry設定
+
+### トレース対象
+
+1. **HTTPリクエスト/レスポンス**
+   - リクエストメソッド、URL、ステータスコード
+   - レスポンスタイム
+
+2. **データベースクエリ**
+   - SQL文、実行時間
+   - バインドパラメータ
+
+3. **ログエントリ**
+   - ログレベル、メッセージ
+   - コンテキスト情報
+
+### 設定ファイル
+
+- `config/opentelemetry.php` - OpenTelemetry設定
+- `.env` - 環境変数による設定
+
+### テストコマンド
+
+```bash
+# OpenTelemetry動作確認
+docker-compose exec app php artisan otel:test
+```
+
+## 🚢 本番環境へのデプロイ
+
+### 1. AWSリソースの作成
+
+[AWS_RESOURCES_SETUP.md](docs/AWS_RESOURCES_SETUP.md) を参照してください。
+
+必要なリソース：
+- EC2インスタンス（Amazon Linux 2023）
+- RDS PostgreSQL
+- IAMロール（X-Ray権限付き）
+- VPC、セキュリティグループ
+
+### 2. EC2セットアップ
+
+[EC2_SETUP.md](docs/EC2_SETUP.md) の手順に従ってください。
+
+主な手順：
+1. 必要なソフトウェアのインストール
+2. X-Ray Daemonのセットアップ
+3. アプリケーションのデプロイ
+4. Nginx/PHP-FPMの設定
+
+### 3. 環境変数の設定
+
+本番環境の`.env`ファイル：
+```env
+APP_ENV=production
+APP_DEBUG=false
+
+DB_CONNECTION=pgsql
+DB_HOST=your-rds-endpoint.amazonaws.com
+DB_DATABASE=laravel
+DB_USERNAME=your_username
+DB_PASSWORD=your_password
+
+OTEL_SERVICE_NAME=laravel-app
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
+OTEL_XRAY_ENABLED=true
+```
+
+## 📊 モニタリング
+
+### AWS X-Ray
+
+1. AWS X-Rayコンソールにアクセス
+2. サービスマップで`laravel-app`を確認
+3. トレース詳細を確認
+
+### CloudWatch
+
+- EC2メトリクス（CPU、メモリ、ネットワーク）
+- RDSメトリクス（接続数、クエリ性能）
+- カスタムメトリクス（アプリケーション固有）
+
+## 🛠️ 開発者向け情報
+
+### Makeコマンド
+
+```bash
+make help       # ヘルプ表示
+make up         # コンテナ起動
+make down       # コンテナ停止
+make logs       # ログ表示
+make shell      # アプリコンテナにアクセス
+make migrate    # マイグレーション実行
+make artisan cmd="..."  # Artisanコマンド実行
+```
+
+### ディレクトリ構成
+
+```
+.
+├── app/                    # Laravelアプリケーション
+│   ├── Http/
+│   │   ├── Controllers/    # APIコントローラー
+│   │   └── Middleware/     # OpenTelemetryミドルウェア
+│   ├── Models/            # Eloquentモデル
+│   └── Providers/         # サービスプロバイダー
+├── config/                # 設定ファイル
+├── database/              # マイグレーション
+├── docker/                # Docker関連ファイル
+│   ├── nginx/            # Nginx設定
+│   ├── php/              # PHP設定
+│   └── otel-collector/   # OpenTelemetry Collector設定
+├── docs/                  # ドキュメント
+├── public/                # 公開ディレクトリ
+├── routes/                # ルート定義
+└── docker-compose.yml     # Docker Compose設定
+```
+
+## 🐛 トラブルシューティング
+
+### よくある問題
+
+1. **トレースが表示されない**
+   - X-Ray DaemonとOTel Collectorの状態を確認
+   - IAMロールの権限を確認
+
+2. **データベース接続エラー**
+   - RDSセキュリティグループの設定を確認
+   - 環境変数の設定を確認
+
+3. **パフォーマンスの問題**
+   - OpenTelemetryのサンプリングレートを調整
+   - バッチプロセッサーの設定を最適化
+
+詳細は [EC2_SETUP.md](docs/EC2_SETUP.md) のトラブルシューティングセクションを参照してください。
+
+## 📝 ライセンス
+
+このプロジェクトはMITライセンスの下で公開されています。
