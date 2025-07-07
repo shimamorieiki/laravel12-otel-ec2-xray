@@ -18,10 +18,7 @@ processors:
       action: upsert
 
 exporters:
-  logging:
-    loglevel: debug
-    
-  # For local development, we'll use stdout
+  # logging exporterは非推奨のため、debug exporterを使用
   debug:
     verbosity: detailed
 
@@ -39,12 +36,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: [logging, debug]
+      exporters: [debug]
     metrics:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: [logging, debug]
+      exporters: [debug]
     logs:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: [logging, debug]
+      exporters: [debug]
