@@ -337,6 +337,326 @@ server {
    - ファイル権限の確認
    - ディレクトリ所有者の確認
 
+## 実際のデプロイ手順（ステップバイステップ）
+
+### Phase 1: 情報収集
+
+#### 1. EC2情報の確認
+
+**SSH接続したEC2内で実行**：
+```bash
+# パブリックIPアドレス
+curl http://checkip.amazonaws.com/
+
+# システム情報
+whoami
+pwd
+cat /etc/os-release
+```
+
+#### 2. RDS情報の確認
+
+**RDSコンソールで確認**：
+- エンドポイント：`laravel-otel-db.xxxxxxxxx.ap-northeast-1.rds.amazonaws.com`
+- ポート：`5432`
+- データベース名：`laravel`
+- ユーザー名：`postgres`
+- パスワード：作成時に設定したパスワード
+
+#### 3. SSH キーペアの確認
+
+**PowerShellで実行**：
+```powershell
+# プライベートキーの内容を表示
+Get-Content "your-key-file.pem"
+```
+
+### Phase 2: EC2の初期設定
+
+#### 1. 基本パッケージのインストール
+
+**SSH接続したEC2内で実行**：
+```bash
+# システムを更新
+sudo yum update -y
+
+# 必要なパッケージをインストール
+sudo yum install -y git nginx php php-fpm php-mbstring php-xml php-pdo php-pgsql php-zip php-curl php-gd php-intl php-bcmath composer
+
+# PostgreSQLクライアントをインストール
+sudo yum install -y postgresql15
+
+# サービスを有効化・開始
+sudo systemctl enable nginx php-fpm
+sudo systemctl start nginx php-fpm
+```
+
+#### 2. アプリケーションディレクトリの作成
+
+```bash
+# アプリケーションディレクトリを作成
+sudo mkdir -p /var/www/html/laravel-app
+sudo chown ec2-user:ec2-user /var/www/html/laravel-app
+
+# 初回のgit clone
+cd /var/www/html/laravel-app
+git clone https://github.com/your-username/laravel12-otel-ec2-xray.git .
+```
+
+#### 3. Nginxの設定
+
+```bash
+# Nginx設定ファイルを作成
+sudo nano /etc/nginx/conf.d/laravel.conf
+```
+
+**設定ファイル内容**：
+```nginx
+server {
+    listen 80;
+    server_name your-ec2-public-ip;
+    root /var/www/html/laravel-app/public;
+
+    index index.php index.html index.htm;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        fastcgi_pass unix:/var/run/php-fpm/www.sock;
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
+```
+
+```bash
+# Nginxを再起動
+sudo systemctl restart nginx
+```
+
+### Phase 3: Laravel設定
+
+#### 1. 環境変数ファイルの作成
+
+```bash
+# .envファイルを作成
+cd /var/www/html/laravel-app
+cp .env.example .env
+nano .env
+```
+
+**`.env`ファイル内容**：
+```env
+APP_NAME=Laravel
+APP_ENV=production
+APP_KEY=base64:your-app-key-here
+APP_DEBUG=false
+APP_URL=http://your-ec2-public-ip
+
+DB_CONNECTION=pgsql
+DB_HOST=your-rds-endpoint
+DB_PORT=5432
+DB_DATABASE=laravel
+DB_USERNAME=postgres
+DB_PASSWORD=your-rds-password
+
+# OpenTelemetry設定
+OTEL_SERVICE_NAME=laravel-app
+OTEL_RESOURCE_ATTRIBUTES=service.name=laravel-app,service.version=1.0.0
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+OTEL_TRACES_EXPORTER=otlp
+OTEL_METRICS_EXPORTER=otlp
+OTEL_LOGS_EXPORTER=otlp
+```
+
+#### 2. Laravel初期設定
+
+```bash
+# 依存関係をインストール
+composer install --no-dev --optimize-autoloader
+
+# APP_KEYを生成
+php artisan key:generate
+
+# 生成されたAPP_KEYを確認（GitHub Secretsで使用）
+php artisan key:generate --show
+
+# キャッシュをクリア
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache
+
+# データベースマイグレーション
+php artisan migrate
+
+# 権限設定
+sudo chown -R ec2-user:nginx /var/www/html/laravel-app
+sudo chmod -R 755 /var/www/html/laravel-app
+sudo chmod -R 775 /var/www/html/laravel-app/storage
+sudo chmod -R 775 /var/www/html/laravel-app/bootstrap/cache
+```
+
+### Phase 4: GitHub Secretsの設定
+
+#### 1. GitHub リポジトリでSecrets設定
+
+**設定場所**：
+```
+GitHub リポジトリ → Settings → Secrets and variables → Actions → New repository secret
+```
+
+#### 2. 設定する値
+
+```
+EC2_HOST=your-ec2-public-ip
+EC2_USERNAME=ec2-user
+EC2_PRIVATE_KEY=your-private-key-content
+DB_HOST=your-rds-endpoint
+DB_PASSWORD=your-rds-password
+APP_KEY=your-generated-app-key
+```
+
+**実際の値の例**：
+```
+EC2_HOST=54.168.131.150
+EC2_USERNAME=ec2-user
+EC2_PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----
+MIIEpAIBAAKCAQEA...
+-----END RSA PRIVATE KEY-----
+DB_HOST=laravel-otel-db.xxxxxxxxx.ap-northeast-1.rds.amazonaws.com
+DB_PASSWORD=your-secure-password
+APP_KEY=base64:abcdefghijklmnopqrstuvwxyz123456789
+```
+
+### Phase 5: GitHub Actions ワークフロー作成
+
+#### 1. ワークフローファイルを作成
+
+**ローカルで`.github/workflows/deploy.yml`を作成**：
+```yaml
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Deploy to EC2
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USERNAME }}
+        key: ${{ secrets.EC2_PRIVATE_KEY }}
+        port: 22
+        script: |
+          cd /var/www/html/laravel-app
+          git pull origin main
+          composer install --no-dev --optimize-autoloader
+          php artisan config:cache
+          php artisan route:cache
+          php artisan view:cache
+          php artisan migrate --force
+          sudo systemctl restart nginx
+          sudo systemctl restart php-fpm
+```
+
+#### 2. ワークフローファイルのコミット
+
+```bash
+# ローカルで実行
+git add .github/workflows/deploy.yml
+git commit -m "Add GitHub Actions deploy workflow"
+git push origin main
+```
+
+### Phase 6: デプロイテスト
+
+#### 1. GitHub Actionsの実行確認
+
+1. **GitHubリポジトリ**の「Actions」タブにアクセス
+2. **ワークフローの実行状況**を確認
+3. **エラーがあれば**ログを確認して修正
+
+#### 2. デプロイ結果の確認
+
+```bash
+# ブラウザでアクセス
+http://your-ec2-public-ip
+```
+
+**期待される結果**：
+- Laravelのウェルカムページが表示される
+- アプリケーションが正常に動作する
+
+### Phase 7: 動作確認
+
+#### 1. アプリケーションの動作確認
+
+```bash
+# EC2内でアプリケーションの状態を確認
+cd /var/www/html/laravel-app
+php artisan route:list
+php artisan config:show
+```
+
+#### 2. データベース接続の確認
+
+```bash
+# データベース接続テスト
+php artisan migrate:status
+```
+
+#### 3. ログの確認
+
+```bash
+# Laravel ログ
+tail -f /var/www/html/laravel-app/storage/logs/laravel.log
+
+# Nginx ログ
+sudo tail -f /var/log/nginx/access.log
+sudo tail -f /var/log/nginx/error.log
+```
+
+## 完了チェックリスト
+
+### 情報収集
+- [ ] EC2のパブリックIPアドレス
+- [ ] RDSエンドポイント
+- [ ] プライベートキー
+- [ ] データベースパスワード
+- [ ] Laravel APP_KEY
+
+### EC2設定
+- [ ] 基本パッケージのインストール
+- [ ] Nginxの設定
+- [ ] アプリケーションディレクトリの作成
+- [ ] Laravel初期設定
+- [ ] データベース接続確認
+
+### GitHub設定
+- [ ] GitHub Secrets設定
+- [ ] ワークフローファイル作成
+- [ ] 初回デプロイ実行
+
+### 動作確認
+- [ ] GitHub Actions実行成功
+- [ ] アプリケーションアクセス確認
+- [ ] データベース接続確認
+
 ## 次のステップ
 
 1. [AWS_RESOURCES_SETUP.md](./AWS_RESOURCES_SETUP.md) - AWSリソースのセットアップ
@@ -346,3 +666,8 @@ server {
 ---
 
 **注意**: 本番環境では、セキュリティ要件に応じて追加の設定が必要になる場合があります。 
+
+
+cat >> ~/.ssh/authorized_keys << 'EOF'
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCi6t2+gyopoPhDGp+9VgC0jzctGRc1bWYbWYtLTYtZ+WQfPUCMlMAV1bH7cTHn5kKcoukojuzUGbD/rL5wir/0r9I0rhPkJuFLmW7rJFntJDIvmoBR8qNIZEVjW+RaK+T+D5Mp/4O6RyDsyXzNsAbFgwzZcSfgNqDiWUcB2wvEihAEHMiJiYwECxnawkQ70bmXqo7+wzk7FkjpKaY2hmOljVgcY9G0BmQofesEj9PV5Zmtf7Rbwgbc0eMgz2O6y6HjByRKNBvCo54zTgzxliaxI7Xq/LPBJ+DfQ2yoXf72mbq7qQqgyOebTCI32POd0UWoUBNwBQ3XmiP14jKtPean
+EOF
