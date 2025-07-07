@@ -59,6 +59,9 @@ services:
       - "4318:4318"  # OTLP HTTP receiver
       - "8888:8888"  # Prometheus metrics exposed by the collector
       - "8889:8889"  # Prometheus exporter metrics
+      - "13133:13133"  # Health check endpoint
+      - "1777:1777"   # pprof endpoint
+      - "55679:55679" # zpages endpoint
     networks:
       - laravel
 
