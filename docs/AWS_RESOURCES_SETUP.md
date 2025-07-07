@@ -2,6 +2,10 @@
 
 このドキュメントでは、Laravel + OpenTelemetry + AWS X-Ray環境を構築するために必要なAWSリソースの作成手順を説明します。
 
+## アカウント
+アカウントID: 18...
+IAMユーザ: e_s...
+
 ## 必要なAWSリソース一覧
 
 1. VPCとネットワーク
@@ -105,15 +109,32 @@ VPC: laravel-otel-vpc
 
 1. **ロールの作成**
    ```
+   エンティティタイプ: AWSのサービス
    ロール名: laravel-otel-ec2-role
    信頼されたエンティティ: EC2
    ```
 
-2. **ポリシーのアタッチ**
+2. **信頼ポリシー（Trust Policy）**
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Principal": {
+           "Service": "ec2.amazonaws.com"
+         },
+         "Action": "sts:AssumeRole"
+       }
+     ]
+   }
+   ```
+
+3. **ポリシーのアタッチ**
    - `AWSXRayDaemonWriteAccess`
    - `CloudWatchAgentServerPolicy`
 
-3. **カスタムポリシー（必要に応じて）**
+4. **カスタムポリシー（必要に応じて）**
    ```json
    {
      "Version": "2012-10-17",
