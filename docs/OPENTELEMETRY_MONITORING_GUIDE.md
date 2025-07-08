@@ -1,360 +1,346 @@
 # OpenTelemetry監視ガイド
 
-## 📋 **概要**
+このガイドでは、OpenTelemetryシステムの監視方法とトラブルシューティングのための診断方法を説明します。
 
-このドキュメントは、Laravel 12アプリケーションに実装されたOpenTelemetryの監視システムについて、どこに何があり、どのようにアクセスして何が分かるかを詳細に説明します。
+## 🎯 監視対象
 
-## 🏗️ **システム構成**
+### 1. OpenTelemetry Collector
+- **コンテナの状態**: 起動状態、再起動回数
+- **エクスポーターの初期化**: 各エクスポーターの初期化状況
+- **データ処理**: トレース、メトリクス、ログの処理状況
+- **AWS X-Ray送信**: X-Rayエクスポーターのトレース送信状況
 
-### コンテナ構成
-```
-laravel-app      → Laravel 12アプリケーション（OpenTelemetryクライアント）
-otel-collector   → OpenTelemetry Collector（データ収集・処理）
-nginx           → Webサーバー
-db              → PostgreSQL データベース
-```
+### 2. Laravel Application
+- **OpenTelemetry設定**: 設定の読み込み状況
+- **トレース生成**: HTTPリクエスト、データベースクエリのトレース
+- **メトリクス**: アプリケーションのパフォーマンス指標
 
-### OpenTelemetryデータフロー
-```
-Laravel App → OpenTelemetry Middleware → OTLP HTTP → Collector → Debug Exporter → ログ出力
-```
+## 🔧 監視コマンド
 
-## 🔧 **OpenTelemetry Collector設定**
+### 基本的な状態確認
 
-### バージョン
-- **OpenTelemetry Collector**: v0.129.0
-- **イメージ**: `otel/opentelemetry-collector-contrib:latest`
-
-### 設定ファイル
-**場所**: `docker/otel-collector/otel-collector-config.yaml`
-
-```yaml
-receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317  # gRPC受信
-      http:
-        endpoint: 0.0.0.0:4318  # HTTP受信（Laravel使用）
-
-processors:
-  batch:
-    timeout: 1s
-    send_batch_size: 1024
-  resource:
-    attributes:
-    - key: environment
-      value: docker
-      action: upsert
-
-exporters:
-  debug:
-    verbosity: detailed       # コンソール出力（詳細）
-
-extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133  # ヘルスチェック
-  pprof:
-    endpoint: 0.0.0.0:1777   # プロファイリング
-  zpages:
-    endpoint: 0.0.0.0:55679  # デバッグページ
-
-service:
-  extensions: [health_check, pprof, zpages]
-  pipelines:
-    traces:
-      receivers: [otlp]
-      processors: [batch, resource]
-      exporters: [debug]
-    metrics:
-      receivers: [otlp]
-      processors: [batch, resource]
-      exporters: [debug]
-    logs:
-      receivers: [otlp]
-      processors: [batch, resource]
-      exporters: [debug]
-```
-
-## 🌐 **アクセス可能なエンドポイント**
-
-### 1. **Laravel アプリケーション**
-| エンドポイント | URL | 説明 |
-|----------------|-----|------|
-| メインページ | `http://localhost/` | Laravel情報ページ |
-| API - アイテム一覧 | `http://localhost/api/items` | アイテム一覧取得 |
-| API - アイテム作成 | `POST http://localhost/api/items` | アイテム作成 |
-| API - アイテム詳細 | `GET http://localhost/api/items/{id}` | 特定アイテム取得 |
-| API - アイテム更新 | `PUT http://localhost/api/items/{id}` | アイテム更新 |
-| API - アイテム削除 | `DELETE http://localhost/api/items/{id}` | アイテム削除 |
-
-### 2. **OpenTelemetry Collector**
-| エンドポイント | URL | 説明 | 現在の状態 |
-|----------------|-----|------|-----------|
-| OTLP gRPC受信 | `http://localhost:4317` | gRPCプロトコル受信 | 🟡 利用可能だが未使用 |
-| OTLP HTTP受信 | `http://localhost:4318` | HTTP受信（Laravel使用） | 🟢 **使用中** |
-| Prometheus メトリクス | `http://localhost:8888/metrics` | Collector自体のメトリクス | 🔴 現在アクセス不可 |
-| Prometheus エクスポート | `http://localhost:8889` | エクスポート用メトリクス | 🔴 現在アクセス不可 |
-
-### 3. **診断・監視エンドポイント**
-| エンドポイント | URL | 説明 | 現在の状態 |
-|----------------|-----|------|-----------|
-| ヘルスチェック | `http://localhost:13133` | Collector稼働状況 | 🔴 設定済みだがアクセス不可 |
-| プロファイリング | `http://localhost:1777` | パフォーマンス分析 | 🔴 設定済みだがアクセス不可 |
-| zPages | `http://localhost:55679` | デバッグ情報 | 🔴 設定済みだがアクセス不可 |
-
-**注意**: 診断エンドポイントはCollector設定ファイルで有効化されていますが、現在外部からアクセスできません。
-
-## 📊 **データ確認方法**
-
-### 1. **トレースデータの確認**
-**方法**: Docker Composeログを確認
+#### コンテナの状態確認
 ```bash
+# 全コンテナの状態確認
+docker-compose ps
+
+# 期待される出力:
+# otel-collector   Up      0.0.0.0:4317->4317/tcp, :::4317->4317/tcp
+# laravel-app      Up      0.0.0.0:80->80/tcp, :::80->80/tcp
+```
+
+#### 環境変数の確認（重要）
+```bash
+# Docker Composeの設定確認
+docker-compose config | Select-String -Pattern 'AWS_|OTEL_'
+
+# 期待される出力:
+# AWS_ACCESS_KEY_ID: [AWS_ACCESS_KEY_ID]
+# AWS_DEFAULT_REGION: ap-northeast-1
+# AWS_SECRET_ACCESS_KEY: [AWS_SECRET_ACCESS_KEY]
+# OTEL_EXPORTERS: debug,awsxray
+```
+
+### OTel Collectorの詳細監視
+
+#### 基本ログの確認
+```bash
+# 最新のログ確認
+docker-compose logs otel-collector --tail=20
+
+# フォローモードでリアルタイム監視
 docker-compose logs -f otel-collector
 ```
 
-**出力例**:
-```
-otel-collector  |     Trace ID       : 36e14d1689717bdfcd701936d27a6eaf
-otel-collector  |     Parent ID      :
-otel-collector  |     ID             : 9085d4bf6376345e
-otel-collector  |     Name           : http.server.request
-otel-collector  |     Kind           : Internal
-otel-collector  |     Start time     : 2025-07-07 08:33:23.759106803 +0000 UTC
-otel-collector  |     End time       : 2025-07-07 08:33:24.383178573 +0000 UTC
-otel-collector  |     Status code    : Unset
-otel-collector  |     Status message :
-otel-collector  | Attributes:
-otel-collector  |      -> http.method: Str(GET)
-otel-collector  |      -> http.url: Str(http://localhost/api/items)
-otel-collector  |      -> http.target: Str(api/items)
-otel-collector  |      -> http.host: Str(localhost)
-otel-collector  |      -> http.scheme: Str(http)
-otel-collector  |      -> http.route: Str(unknown)
-otel-collector  |      -> http.user_agent: Str(Mozilla/5.0...)
-otel-collector  |      -> http.client_ip: Str(192.168.192.1)
-otel-collector  |      -> http.status_code: Int(200)
-```
-
-### 2. **データベースクエリトレース**
-**場所**: 同じログに出力されます
-**含まれる情報**:
-- SQL文
-- 実行時間
-- バインディング
-- データベース種別
-
-### 3. **システムメトリクス**
-**場所**: 同じログに出力されます
-**含まれる情報**:
-- リクエスト数
-- レスポンス時間
-- エラー率
-- サービス情報
-
-## 🔄 **Laravel側の設定**
-
-### 環境変数（.env）
-```env
-# OpenTelemetry設定
-OTEL_SERVICE_NAME=laravel-app
-OTEL_RESOURCE_ATTRIBUTES=service.name=laravel-app,service.version=1.0.0,deployment.environment=docker
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http/json
-OTEL_TRACES_EXPORTER=otlp
-OTEL_METRICS_EXPORTER=otlp
-OTEL_LOGS_EXPORTER=otlp
-OTEL_TRACES_ENABLED=true
-OTEL_METRICS_ENABLED=true
-OTEL_LOGS_ENABLED=true
-
-# AWS設定（X-Ray使用時は必須）
-AWS_ACCESS_KEY_ID=your-access-key-id
-AWS_SECRET_ACCESS_KEY=your-secret-access-key
-AWS_DEFAULT_REGION=ap-northeast-1
-
-# X-Ray設定
-OTEL_XRAY_ENABLED=true
-OTEL_XRAY_LOCAL_MODE=false
-OTEL_XRAY_ENDPOINT=
-# 注意：OTEL_EXPORTERS設定は文字列形式で指定（配列形式[debug, awsxray]は無効）
-OTEL_EXPORTERS=debug,awsxray
-```
-
-### 🚨 **重要な注意点**
-
-#### **AWS認証情報の設定**
-- **Docker環境の場合**: .envファイルに`AWS_ACCESS_KEY_ID`と`AWS_SECRET_ACCESS_KEY`の明示的な設定が必要
-- **理由**: Docker内のOTel CollectorはホストのAWS CLI設定を直接参照できないため
-- **セキュリティ**: .envファイルは.gitignoreに含まれており、Gitにコミットされません
-
-#### **OTEL_EXPORTERS設定の形式**
-- **正しい形式**: `OTEL_EXPORTERS=debug,awsxray`
-- **間違った形式**: `OTEL_EXPORTERS=[debug, awsxray]`（配列形式は無効）
-- **理由**: .envファイルでは文字列形式でのみ指定可能
-
-#### **X-Rayエクスポーターの制限**
-- **対応データ**: トレースのみ
-- **非対応データ**: メトリクス、ログ
-- **設定**: OTel Collectorでは、X-Rayエクスポーターをトレースパイプラインでのみ使用
-- **メトリクス・ログ**: debugエクスポーターのみ使用
-
-### 🔧 **OTel Collector設定の確認**
-
-`docker/otel-collector/otel-collector-config.yaml`が以下のように設定されていることを確認してください：
-
-```yaml
-service:
-  extensions: [health_check, pprof, zpages]
-  pipelines:
-    traces:
-      receivers: [otlp]
-      processors: [batch, resource]
-      exporters: [debug, awsxray]  # X-Rayはトレースのみ
-    metrics:
-      receivers: [otlp]
-      processors: [batch, resource]
-      exporters: [debug]           # メトリクスではX-Ray使用不可
-    logs:
-      receivers: [otlp]
-      processors: [batch, resource]
-      exporters: [debug]           # ログではX-Ray使用不可
-```
-
-### 実装されている機能
-1. **HTTPリクエストトレース**: OpenTelemetryMiddleware
-2. **データベースクエリトレース**: OpenTelemetryServiceProvider
-3. **ログトレース**: OpenTelemetryServiceProvider
-4. **カスタム属性**: リクエストヘッダー、クライアントIP等
-
-## 🧪 **テスト方法**
-
-### 1. **基本的なHTTPリクエストテスト**
+#### X-Rayエクスポーターの監視（重要）
 ```bash
-# PowerShell
-Invoke-WebRequest -Uri "http://localhost/" -Method Get
+# X-Rayエクスポーターの初期化確認
+docker-compose logs otel-collector | Select-String -Pattern 'awsxray'
 
-# 期待される結果: 200 OK + OpenTelemetryログ出力
+# 期待される出力:
+# "otelcol.component.id": "awsxray", "otelcol.component.kind": "exporter"
+# "region": "ap-northeast-1"
+
+# X-Rayエクスポーターのトレース送信確認
+docker-compose logs otel-collector | Select-String -Pattern 'TracesExporter'
+
+# 期待される出力:
+# TracesExporter ... "#spans": 10
+# request: &{TraceSegmentDocuments:[...]}
+# response: &{UnprocessedTraceSegments:[] ...}
 ```
 
-### 2. **API呼び出しテスト**
+#### エラーログの確認
 ```bash
-# PowerShell
-Invoke-WebRequest -Uri "http://localhost/api/items" -Method Get
+# エラーログの確認
+docker-compose logs otel-collector | Select-String -Pattern 'error|Error|failed|Failed'
 
-# 期待される結果: JSON応答 + データベースクエリトレース
+# 警告ログの確認
+docker-compose logs otel-collector | Select-String -Pattern 'warn|Warning'
 ```
 
-### 3. **複数リクエストでの負荷テスト**
+#### デバッグログの確認（デバッグレベル有効時）
 ```bash
-# PowerShell
-1..10 | ForEach-Object { Invoke-WebRequest -Uri "http://localhost/api/items" -Method Get }
+# デバッグレベルのログ確認
+docker-compose logs otel-collector | Select-String -Pattern 'debug'
 
-# 期待される結果: 10個のトレースが生成される
+# X-Ray関連のデバッグログ
+docker-compose logs otel-collector | Select-String -Pattern 'debug.*awsxray'
 ```
 
-## 🔍 **監視ポイント**
+### Laravel Applicationの監視
 
-### 1. **パフォーマンス監視**
-- **レスポンス時間**: Start time - End time
-- **データベース実行時間**: db.execution_time_ms
-- **エラー率**: http.status_code >= 400
-
-### 2. **エラー監視**
-- **502エラー**: Nginx-PHP-FPM通信エラー
-- **500エラー**: Laravel内部エラー
-- **データベース接続エラー**: 接続プールの問題
-
-### 3. **リソース監視**
-- **メモリ使用量**: Collectorログで確認
-- **CPU使用率**: Dockerコンテナ統計
-- **ディスク使用量**: ログファイルサイズ
-
-## 🛠️ **トラブルシューティング**
-
-### 1. **データが送信されない場合**
+#### OpenTelemetryの設定確認
 ```bash
-# Laravel設定確認
-docker-compose exec app php artisan about
+# OpenTelemetry設定の確認
+docker-compose exec app php artisan config:show opentelemetry
 
-# Collector状態確認
-docker-compose logs otel-collector
-
-# ネットワーク確認
-docker-compose exec app ping otel-collector
+# 期待される出力:
+# opentelemetry.service_name => "laravel-app"
+# opentelemetry.traces.enabled => true
+# opentelemetry.exporter => "otlp"
 ```
 
-### 2. **Collectorが再起動し続ける場合**
+#### トレースの生成テスト
 ```bash
-# 設定ファイル検証
-docker-compose exec otel-collector /otelcol-contrib --config-validate=/etc/otel-collector-config.yaml
+# OpenTelemetryテストコマンド
+docker-compose exec app php artisan otel:test
 
-# ログ確認
-docker-compose logs otel-collector
+# 期待される出力:
+# OpenTelemetry Test Command
+# Generating sample traces...
+# Test completed successfully!
 ```
 
-### 3. **パフォーマンスの問題**
+## 📊 ヘルスチェック
+
+### OTel Collectorのヘルスチェック
 ```bash
-# バッチ処理設定調整
-# batch processor の timeout と send_batch_size を調整
+# ヘルスチェックエンドポイント
+curl http://localhost:13133/
 
-# メモリ制限確認
-docker stats otel-collector
+# 期待される出力:
+# {"status":"Server available","upSince":"2024-01-01T12:00:00Z"}
 ```
 
-## 📈 **データ送信確認**
+### メトリクスの確認
+```bash
+# Collectorのメトリクス
+curl http://localhost:8888/metrics
 
-### 現在の状況
-✅ **データ送信**: Laravel → OpenTelemetry Collector（HTTP経由 port:4318）  
-✅ **データ処理**: Collector内でバッチ処理  
-✅ **データ出力**: Collectorログに詳細出力  
-✅ **トレース生成**: すべてのHTTPリクエストで自動生成  
-✅ **パフォーマンス**: レスポンス時間 20秒+ → 2秒に大幅改善
+# 主要なメトリクス:
+# otelcol_receiver_accepted_spans_total
+# otelcol_exporter_sent_spans_total
+# otelcol_processor_batch_batch_send_size_sum
+```
 
-### ✅ **Collectorへの送信が確認されていること**
-**送信と言っているのはCollectorに届いていることを指しています。** 以下で確認済み：
+### zPagesでのデバッグ情報
+```bash
+# ブラウザでアクセス
+# http://localhost:55679/debug/tracez
+# http://localhost:55679/debug/pipelinez
+```
 
-1. **HTTPリクエスト→トレース生成**: リクエスト毎に自動で生成
-2. **Collectorでの受信**: OTLP HTTP (port:4318) で正常受信
-3. **ログ出力**: Collectorログでトレースデータの詳細確認可能
-4. **属性収集**: HTTP詳細、DB情報、リクエスト情報など
+## 🚨 アラート設定
 
-### 確認方法
-1. **リクエスト送信**
-   ```bash
-   Invoke-WebRequest -Uri "http://localhost/api/items" -Method Get
-   ```
+### 重要な監視項目
 
-2. **ログ確認** (Collectorに送信されたデータの確認)
-   ```bash
-   docker-compose logs -f otel-collector
-   ```
+#### 1. X-Rayエクスポーターの初期化失敗
+```bash
+# 確認方法
+docker-compose logs otel-collector | Select-String -Pattern 'awsxray.*failed|awsxray.*error'
 
-3. **データ確認** (実際に送信されているデータ)
-   - **Trace ID**: 一意のトレース識別子 (例: 36e14d1689717bdfcd701936d27a6eaf)
-   - **Span ID**: 個別操作の識別子 (例: 9085d4bf6376345e)
-   - **属性**: HTTP詳細情報（method, url, status_code, user_agent等）
-   - **タイムスタンプ**: 開始・終了時間（実行時間測定可能）
+# 問題がある場合の対処
+# 1. 環境変数の確認
+# 2. AWS認証情報の確認
+# 3. X-Ray権限の確認
+```
 
-## 🔮 **今後の拡張**
+#### 2. トレース送信の失敗
+```bash
+# 確認方法
+docker-compose logs otel-collector | Select-String -Pattern 'TracesExporter.*error|TracesExporter.*failed'
 
-### 1. **外部エクスポーターの追加**
-- Jaeger（分散トレーシング）
-- Prometheus（メトリクス）
-- AWS X-Ray（クラウド監視）
+# 問題がある場合の対処
+# 1. AWS認証情報の確認
+# 2. ネットワーク接続の確認
+# 3. X-Ray API制限の確認
+```
 
-### 2. **カスタムメトリクスの実装**
-- ビジネスメトリクス
-- カスタムイベント
-- アプリケーション固有の測定値
+#### 3. コンテナの再起動
+```bash
+# 確認方法
+docker-compose ps | Select-String -Pattern 'Restarting|Exit'
 
-### 3. **アラート設定**
-- エラー率しきい値
-- レスポンス時間アラート
-- リソース使用率アラート
+# 問題がある場合の対処
+# 1. ログの確認
+# 2. 設定ファイルの確認
+# 3. リソース使用量の確認
+```
+
+### 自動監視スクリプト
+
+#### 基本的な監視スクリプト
+```bash
+#!/bin/bash
+# monitor_otel.sh
+
+echo "=== OpenTelemetry Monitoring ==="
+echo "Date: $(date)"
+echo ""
+
+echo "1. Container Status:"
+docker-compose ps
+echo ""
+
+echo "2. X-Ray Exporter Status:"
+docker-compose logs otel-collector --tail=10 | grep -i "awsxray\|TracesExporter"
+echo ""
+
+echo "3. Recent Errors:"
+docker-compose logs otel-collector --tail=50 | grep -i "error\|failed\|warn"
+echo ""
+
+echo "4. Health Check:"
+curl -s http://localhost:13133/ | head -1
+echo ""
+```
+
+## 🔍 パフォーマンス監視
+
+### メトリクスの収集
+```bash
+# システムリソース使用量
+docker stats --no-stream
+
+# 特定コンテナのリソース使用量
+docker stats otel-collector --no-stream
+```
+
+### バッチ処理の監視
+```bash
+# バッチ処理の統計
+curl -s http://localhost:8888/metrics | grep "otelcol_processor_batch"
+
+# 重要なメトリクス:
+# otelcol_processor_batch_batch_send_size_sum - 送信バッチサイズの合計
+# otelcol_processor_batch_timeout_trigger_send_total - タイムアウトによる送信回数
+```
+
+## 📈 AWS X-Ray監視
+
+### X-Rayコンソールでの確認
+[AWS X-Rayコンソール](https://console.aws.amazon.com/xray/home?region=ap-northeast-1#/traces)
+
+#### 確認項目
+1. **トレースの受信状況**
+   - 最新のトレースが表示されているか
+   - トレースの頻度が適切か
+
+2. **サービスマップ**
+   - `laravel-app`サービスが表示されているか
+   - 依存関係が正しく表示されているか
+
+3. **エラー率**
+   - エラーの発生頻度
+   - エラーの種類と原因
+
+### AWS CLIを使用した監視
+```bash
+# X-Rayサービス統計の取得
+aws xray get-service-graph --start-time 2024-01-01T00:00:00Z --end-time 2024-01-01T23:59:59Z
+
+# トレースの検索
+aws xray get-trace-summaries --time-range-type TimeRangeByStartTime --start-time 2024-01-01T00:00:00Z --end-time 2024-01-01T23:59:59Z
+```
+
+## 🔧 トラブルシューティング
+
+### 症状別の診断手順
+
+#### 1. X-Rayにトレースが表示されない
+```bash
+# 1. 環境変数の確認
+docker-compose config | Select-String -Pattern 'AWS_'
+
+# 2. X-Rayエクスポーターの初期化確認
+docker-compose logs otel-collector | Select-String -Pattern 'awsxray'
+
+# 3. トレース送信の確認
+docker-compose logs otel-collector | Select-String -Pattern 'TracesExporter'
+
+# 4. AWS認証の確認
+aws sts get-caller-identity
+```
+
+#### 2. コンテナが頻繁に再起動する
+```bash
+# 1. 現在の状態確認
+docker-compose ps
+
+# 2. 詳細ログの確認
+docker-compose logs otel-collector --tail=100
+
+# 3. 設定ファイルの確認
+docker-compose config
+
+# 4. リソース使用量の確認
+docker stats
+```
+
+#### 3. パフォーマンス問題
+```bash
+# 1. メトリクスの確認
+curl http://localhost:8888/metrics
+
+# 2. バッチサイズの確認
+docker-compose logs otel-collector | grep "batch"
+
+# 3. 設定の最適化
+# otel-collector-config.yamlのprocessors設定を調整
+```
+
+## 📋 定期確認チェックリスト
+
+### 日次チェック
+- [ ] コンテナの状態確認
+- [ ] X-Rayエクスポーターの初期化確認
+- [ ] 最新のトレースがX-Rayコンソールに表示されているか
+- [ ] エラーログの有無確認
+
+### 週次チェック
+- [ ] パフォーマンスメトリクスの確認
+- [ ] バッチ処理の効率確認
+- [ ] AWS X-Rayコンソールでのサービスマップ確認
+- [ ] 設定ファイルの最適化検討
+
+### 月次チェック
+- [ ] ログの長期傾向分析
+- [ ] コスト最適化の検討
+- [ ] 設定の見直しと更新
+- [ ] ドキュメントの更新
+
+## 🔗 関連リンク
+
+- [X-Rayトラブルシューティングガイド](XRAY_TROUBLESHOOTING_GUIDE.md)
+- [ローカルX-Ray設定ガイド](LOCAL_XRAY_SETUP.md)
+- [AWS X-Rayコンソール](https://console.aws.amazon.com/xray/home?region=ap-northeast-1#/traces)
+- [OpenTelemetry Collector メトリクス](https://opentelemetry.io/docs/collector/monitoring/)
 
 ---
 
-## 💡 **まとめ**
+## 💡 重要なポイント
 
-OpenTelemetryシステムは正常に動作しており、すべてのHTTPリクエストがCollectorに送信され、詳細なトレースデータがログに出力されています。現在の設定では、デバッグ目的でコンソール出力を使用していますが、本番環境では適切な外部システムへの送信を検討してください。 
+### 1. 環境変数の監視
+- **最重要**: AWS認証情報が正しく設定されているか定期的に確認
+- システムの環境変数とDockerの環境変数の競合に注意
+
+### 2. X-Rayエクスポーターの監視
+- 初期化ログの確認は必須
+- `TracesExporter`ログでトレース送信の成功を確認
+- `UnprocessedTraceSegments:[]`で全てのトレースが処理されていることを確認
+
+### 3. 継続的な監視
+- ログの傾向を定期的に分析
+- パフォーマンスメトリクスの追跡
+- AWS X-Rayコンソールでの定期的な確認 

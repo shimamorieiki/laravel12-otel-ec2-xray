@@ -1,315 +1,223 @@
-# Laravel 12 + OpenTelemetry + AWS X-Ray
+# Laravel 12 + OpenTelemetry + AWS X-Ray on EC2
 
-Laravel 12アプリケーションにOpenTelemetryを統合し、EC2上で動作させてAWS X-Rayでトレースを可視化するプロジェクトです。
+このプロジェクトは、Laravel 12アプリケーションにOpenTelemetryを統合し、AWS X-RayとEC2環境での監視を実現するサンプルプロジェクトです。
 
-## 🎯 プロジェクト概要
+## 🚀 主な機能
 
-このプロジェクトは以下を実現します：
+- **Laravel 12** - 最新のLaravelフレームワーク
+- **OpenTelemetry** - トレース、メトリクス、ログの統合観測
+- **AWS X-Ray** - AWSネイティブの分散トレーシング
+- **Docker Compose** - 開発環境の簡単セットアップ
+- **PostgreSQL** - データベース
+- **Nginx** - ウェブサーバー
+- **GitHub Actions** - EC2への自動デプロイ
 
-- **Laravel 12** を使用したRESTful API（CRUD操作）
-- **OpenTelemetry** によるアプリケーションの計装（HTTP、データベース、ログ）
-- **AWS X-Ray** へのトレースデータ送信と可視化
-- **Docker Compose** による開発環境
-- **EC2** での本番環境デプロイ
+## ⚠️ 重要な注意事項
 
-## 🏗️ アーキテクチャ
+### AWS認証情報の設定
+**必須**: AWS認証情報を正しく設定しないと、X-Rayエクスポーターが動作しません。
 
-### 本番環境（AWS）
-```
-User → EC2 (Nginx + Laravel) → OpenTelemetry → X-Ray Daemon → AWS X-Ray
-                ↓
-            RDS PostgreSQL
-```
-
-### 開発環境（Docker）
-```
-User → Nginx → Laravel → OpenTelemetry → OTel Collector → stdout
-         ↓
-    PostgreSQL (Docker)
-```
-
-## 🚀 クイックスタート
-
-### 前提条件
-
-- Docker & Docker Compose
-- PHP 8.3+ (ローカル開発の場合)
-- Composer (ローカル開発の場合)
-
-### 開発環境のセットアップ
-
-1. **リポジトリのクローン**
-   ```bash
-   git clone https://github.com/shimamorieiki/laravel12-otel-ec2-xray.git
-   cd laravel12-otel-ec2-xray
-   ```
-
-2. **環境設定**
-   ```bash
-   cp .env.docker .env
-   ```
-
-3. **Dockerコンテナの起動**
-   ```bash
-   make setup  # 初回のみ
-   make up     # 2回目以降
-   ```
-
-4. **動作確認**
-   ```bash
-   # ヘルスチェック
-   curl http://localhost/up
-
-   # Items API
-   curl http://localhost/api/items
-   ```
-
-## 📚 API仕様
-
-### Items CRUD API
-
-| メソッド | エンドポイント | 説明 |
-|---------|--------------|------|
-| GET | `/api/items` | 全アイテムの取得 |
-| GET | `/api/items/{id}` | 特定アイテムの取得 |
-| POST | `/api/items` | 新規アイテムの作成 |
-| PUT | `/api/items/{id}` | アイテムの更新 |
-| DELETE | `/api/items/{id}` | アイテムの削除 |
-
-#### リクエスト例
-
-```bash
-# アイテムの作成
-curl -X POST http://localhost/api/items \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "サンプル商品",
-    "description": "これはテスト商品です",
-    "price": 1980,
-    "quantity": 10
-  }'
-
-# アイテムの取得
-curl http://localhost/api/items
-
-# アイテムの更新
-curl -X PUT http://localhost/api/items/1 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "quantity": 20
-  }'
-
-# アイテムの削除
-curl -X DELETE http://localhost/api/items/1
-```
-
-## 🔧 OpenTelemetry設定
-
-### トレース対象
-
-1. **HTTPリクエスト/レスポンス**
-   - リクエストメソッド、URL、ステータスコード
-   - レスポンスタイム
-
-2. **データベースクエリ**
-   - SQL文、実行時間
-   - バインドパラメータ
-
-3. **ログエントリ**
-   - ログレベル、メッセージ
-   - コンテキスト情報
-
-### 設定ファイル
-
-- `config/opentelemetry.php` - OpenTelemetry設定
-- `.env` - 環境変数による設定
-- `docker/otel-collector/otel-collector-config.yaml` - ローカル用Collector設定
-- `docker/otel-collector/otel-collector-config.ec2.yaml` - EC2用Collector設定
-
-### X-Ray統合
-
-#### ローカル環境での設定
-
-1. **AWS認証情報の設定**
-   ```bash
-   # 環境変数で設定
-   export AWS_ACCESS_KEY_ID="your-access-key-id"
-   export AWS_SECRET_ACCESS_KEY="your-secret-access-key"
-   export AWS_DEFAULT_REGION="ap-northeast-1"
-   ```
-
-2. **`.env`ファイルの設定**
+1. **`.env`ファイルに必須設定**:
    ```env
-   # X-Ray設定
-   OTEL_XRAY_ENABLED=true
-   OTEL_XRAY_LOCAL_MODE=false
-   OTEL_XRAY_ENDPOINT=
-   # 注意：OTEL_EXPORTERS設定は文字列形式で指定（配列形式[debug, awsxray]は無効）
-   OTEL_EXPORTERS=debug,awsxray
-   
-   # AWS設定（重要：Docker環境では.envファイルに記載が必要）
    AWS_ACCESS_KEY_ID=your-access-key-id
    AWS_SECRET_ACCESS_KEY=your-secret-access-key
    AWS_DEFAULT_REGION=ap-northeast-1
    ```
 
-3. **⚠️ 重要な注意点**
-   - **AWS認証情報**: Docker環境では.envファイルに明示的に設定が必要
-   - **OTEL_EXPORTERS形式**: 文字列形式で指定（配列形式は無効）
-   - **X-Rayエクスポーター**: トレースのみをサポート（メトリクス・ログは非対応）
+2. **`docker-compose.yml`での環境変数設定**:
+   - `env_file: - .env`でファイルを明示的に指定
+   - `AWS_DEFAULT_REGION=ap-northeast-1`でリージョンを強制指定（システム環境変数を上書き）
 
-4. **詳細な設定手順**
-   詳細は [LOCAL_XRAY_SETUP.md](docs/LOCAL_XRAY_SETUP.md) を参照してください。
+### X-Rayエクスポーターの制限事項
+- **トレースのみサポート**: X-Rayエクスポーターはメトリクスとログをサポートしていません
+- **OTEL_EXPORTERS形式**: `OTEL_EXPORTERS=debug,awsxray`（配列形式 `[debug, awsxray]` は無効）
 
-#### EC2環境での設定
+### 環境変数の優先順位
+Docker Composeでは以下の優先順位で環境変数が適用されます：
+1. システムの環境変数（最優先）
+2. `docker-compose.yml`の`environment`セクション
+3. `.env`ファイル（最低優先）
 
-1. **IAMロールの設定**
-   - `AWSXRayDaemonWriteAccess` ポリシーをEC2にアタッチ
+**注意**: システムに`AWS_DEFAULT_REGION`が設定されている場合、`.env`ファイルの設定が無視される場合があります。
 
-2. **OpenTelemetry Collectorの設定**
-   - EC2専用の設定ファイル（`otel-collector-config.ec2.yaml`）を使用
-   - `local_mode: true` でX-Ray APIに直接送信
+## 📦 ローカル開発環境のセットアップ
 
-3. **詳細な設定手順**
-   詳細は [EC2_SETUP.md](docs/EC2_SETUP.md) を参照してください。
+### 前提条件
+- Docker & Docker Compose
+- AWS CLI設定済み
+- Git
 
-### テストコマンド
-
+### 1. プロジェクトのクローン
 ```bash
-# OpenTelemetry動作確認
+git clone <repository-url>
+cd laravel12-otel-ec2-xray
+```
+
+### 2. 環境変数設定
+```bash
+cp .env.example .env
+# .envファイルを編集してAWS認証情報を設定
+```
+
+### 3. アプリケーション起動
+```bash
+docker-compose up -d
+```
+
+### 4. 初期セットアップ
+```bash
+# Laravelのキー生成
+docker-compose exec app php artisan key:generate
+
+# データベースマイグレーション
+docker-compose exec app php artisan migrate
+
+# サンプルデータ投入
+docker-compose exec app php artisan db:seed
+```
+
+## 🚀 EC2への自動デプロイ
+
+このプロジェクトには、GitHub Actionsを使用したEC2への自動デプロイ機能が含まれています。
+
+### デプロイアーキテクチャ
+```
+GitHub Repository → GitHub Actions → EC2 Instance
+                                    ├── Nginx + PHP-FPM
+                                    ├── OpenTelemetry Collector
+                                    ├── AWS X-Ray Daemon
+                                    └── RDS PostgreSQL
+```
+
+### デプロイの設定手順
+
+1. **EC2インスタンスの準備**
+   - Amazon Linux 2023
+   - 適切なIAMロールをアタッチ
+   - セキュリティグループの設定
+
+2. **初期セットアップスクリプトの実行**
+   ```bash
+   # EC2にSSH接続
+   ssh -i your-key.pem ec2-user@your-ec2-ip
+   
+   # セットアップスクリプトの実行
+   wget https://raw.githubusercontent.com/yourusername/laravel12-otel-ec2-xray/main/scripts/setup-ec2.sh
+   chmod +x setup-ec2.sh
+   ./setup-ec2.sh
+   ```
+
+3. **GitHub Secretsの設定**
+   - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
+   - `EC2_HOST` / `EC2_USERNAME` / `EC2_PRIVATE_KEY`
+   - `DB_HOST` / `DB_PASSWORD`
+   - `APP_KEY`
+
+4. **自動デプロイの実行**
+   ```bash
+   # mainブランチにpushすると自動デプロイが開始
+   git push origin main
+   ```
+
+### デプロイワークフローの機能
+- **自動コードデプロイ**: Git pullによる最新コード取得
+- **依存関係管理**: Composer install自動実行
+- **環境設定**: 本番環境用.envファイルの自動生成
+- **データベース**: マイグレーション自動実行
+- **サービス管理**: Nginx, PHP-FPM, OpenTelemetry, X-Rayの自動再起動
+- **ヘルスチェック**: デプロイ後の動作確認
+- **ログ監視**: デプロイ状況の詳細ログ出力
+
+## 🧪 動作確認
+
+### API テスト
+```bash
+# Windows PowerShell
+.\test_api.ps1
+
+# Linux/macOS
+./test_api.sh
+```
+
+### OpenTelemetryテスト
+```bash
 docker-compose exec app php artisan otel:test
-
-# X-Ray Collectorのログ確認
-docker-compose logs otel-collector
-
-# AWS認証情報の確認
-aws sts get-caller-identity
 ```
 
-## 📖 詳細ドキュメント
+### X-Ray確認
+[AWS X-Rayコンソール](https://console.aws.amazon.com/xray/home?region=ap-northeast-1#/traces)でトレースを確認
 
-### 設定ガイド
-- [AWS CLI設定ガイド](docs/AWS_CLI_SETUP_GUIDE.md) - AWS CLI設定と認証情報設定
-- [ローカルX-Ray設定](docs/LOCAL_XRAY_SETUP.md) - ローカル環境でのX-Ray設定
-- [OpenTelemetry監視ガイド](docs/OPENTELEMETRY_MONITORING_GUIDE.md) - 監視とログ確認方法
+## 🔧 トラブルシューティング
 
-### デプロイガイド
-- [AWSリソース設定](docs/AWS_RESOURCES_SETUP.md) - EC2、RDS、IAMロールの設定
-- [EC2設定ガイド](docs/EC2_SETUP.md) - EC2でのアプリケーション設定
-- [GitHub Actions Deploy](docs/GITHUB_ACTIONS_DEPLOY.md) - CI/CDパイプライン設定
+### X-Rayにトレースが表示されない場合
 
-### トラブルシューティング
-- [X-Rayトラブルシューティング](docs/XRAY_TROUBLESHOOTING_GUIDE.md) - 問題解決と診断手順
-- [AWS認証情報設定](docs/AWS_CREDENTIALS_SETUP.md) - 認証情報の詳細設定方法
+1. **環境変数確認**:
+   ```bash
+   docker-compose config | Select-String -Pattern 'AWS_'
+   ```
 
-## 🚢 本番環境へのデプロイ
+2. **OTel Collectorログ確認**:
+   ```bash
+   docker-compose logs otel-collector | Select-String -Pattern 'awsxray'
+   ```
 
-### 1. AWSリソースの作成
-
-[AWS_RESOURCES_SETUP.md](docs/AWS_RESOURCES_SETUP.md) を参照してください。
-
-必要なリソース：
-- EC2インスタンス（Amazon Linux 2023）
-- RDS PostgreSQL
-- IAMロール（X-Ray権限付き）
-- VPC、セキュリティグループ
-
-### 2. EC2セットアップ
-
-[EC2_SETUP.md](docs/EC2_SETUP.md) の手順に従ってください。
-
-主な手順：
-1. 必要なソフトウェアのインストール
-2. X-Ray Daemonのセットアップ
-3. アプリケーションのデプロイ
-4. Nginx/PHP-FPMの設定
-
-### 3. 環境変数の設定
-
-本番環境の`.env`ファイル：
-```env
-APP_ENV=production
-APP_DEBUG=false
-
-DB_CONNECTION=pgsql
-DB_HOST=your-rds-endpoint.amazonaws.com
-DB_DATABASE=laravel
-DB_USERNAME=your_username
-DB_PASSWORD=your_password
-
-OTEL_SERVICE_NAME=laravel-app
-OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
-OTEL_XRAY_ENABLED=true
-```
-
-## 📊 モニタリング
-
-### AWS X-Ray
-
-1. AWS X-Rayコンソールにアクセス
-2. サービスマップで`laravel-app`を確認
-3. トレース詳細を確認
-
-### CloudWatch
-
-- EC2メトリクス（CPU、メモリ、ネットワーク）
-- RDSメトリクス（接続数、クエリ性能）
-- カスタムメトリクス（アプリケーション固有）
-
-## 🛠️ 開発者向け情報
-
-### Makeコマンド
-
-```bash
-make help       # ヘルプ表示
-make up         # コンテナ起動
-make down       # コンテナ停止
-make logs       # ログ表示
-make shell      # アプリコンテナにアクセス
-make migrate    # マイグレーション実行
-make artisan cmd="..."  # Artisanコマンド実行
-```
-
-### ディレクトリ構成
-
-```
-.
-├── app/                    # Laravelアプリケーション
-│   ├── Http/
-│   │   ├── Controllers/    # APIコントローラー
-│   │   └── Middleware/     # OpenTelemetryミドルウェア
-│   ├── Models/            # Eloquentモデル
-│   └── Providers/         # サービスプロバイダー
-├── config/                # 設定ファイル
-├── database/              # マイグレーション
-├── docker/                # Docker関連ファイル
-│   ├── nginx/            # Nginx設定
-│   ├── php/              # PHP設定
-│   └── otel-collector/   # OpenTelemetry Collector設定
-├── docs/                  # ドキュメント
-├── public/                # 公開ディレクトリ
-├── routes/                # ルート定義
-└── docker-compose.yml     # Docker Compose設定
-```
-
-## 🐛 トラブルシューティング
+3. **詳細ログ確認**:
+   OTel Collectorの設定でデバッグレベルを有効化済み
 
 ### よくある問題
+- **AWS認証エラー**: `.env`ファイルのAWS認証情報を確認
+- **リージョン不一致**: `AWS_DEFAULT_REGION=ap-northeast-1`が正しく設定されているか確認
+- **X-Rayエクスポーター未初期化**: 環境変数がコンテナに正しく渡されているか確認
 
-1. **トレースが表示されない**
-   - X-Ray DaemonとOTel Collectorの状態を確認
-   - IAMロールの権限を確認
+詳細なトラブルシューティングガイド: [docs/XRAY_TROUBLESHOOTING_GUIDE.md](docs/XRAY_TROUBLESHOOTING_GUIDE.md)
 
-2. **データベース接続エラー**
-   - RDSセキュリティグループの設定を確認
-   - 環境変数の設定を確認
+## 📚 ドキュメント
 
-3. **パフォーマンスの問題**
-   - OpenTelemetryのサンプリングレートを調整
-   - バッチプロセッサーの設定を最適化
+### 開発・設定ガイド
+- [AWS CLI設定ガイド](docs/AWS_CLI_SETUP_GUIDE.md)
+- [ローカルX-Ray設定](docs/LOCAL_XRAY_SETUP.md)
+- [OpenTelemetry監視ガイド](docs/OPENTELEMETRY_MONITORING_GUIDE.md)
+- [X-Rayトラブルシューティング](docs/XRAY_TROUBLESHOOTING_GUIDE.md)
 
-詳細は [EC2_SETUP.md](docs/EC2_SETUP.md) のトラブルシューティングセクションを参照してください。
+### デプロイ・本番環境ガイド
+- [EC2デプロイワークフロー設定](docs/EC2_DEPLOY_SETUP.md)
+- [EC2セットアップ](docs/EC2_SETUP.md)
+- [GitHub Actions デプロイ](docs/GITHUB_ACTIONS_DEPLOY.md)
 
-## 📝 ライセンス
+## 🏗️ プロジェクト構成
 
-このプロジェクトはMITライセンスの下で公開されています。
+### ローカル開発環境
+```
+Docker Compose
+├── Laravel App (PHP-FPM)
+├── Nginx
+├── PostgreSQL
+└── OpenTelemetry Collector → AWS X-Ray API
+```
+
+### 本番環境（EC2）
+```
+EC2 Instance
+├── Nginx + PHP-FPM
+├── Laravel Application
+├── OpenTelemetry Collector
+├── AWS X-Ray Daemon
+└── RDS PostgreSQL
+```
+
+## 🚀 主要な改善点
+
+### パフォーマンス最適化
+- OpenTelemetryバッチ処理の最適化
+- PHP-FPMとNginxの設定調整
+- データベース接続プールの最適化
+
+### 監視機能
+- AWS X-Rayによる分散トレーシング
+- CloudWatchによるメトリクス監視
+- 包括的なログ収集
+
+### 自動化
+- GitHub Actionsによる継続的デプロイ
+- 自動テストとヘルスチェック
+- 環境固有の設定管理

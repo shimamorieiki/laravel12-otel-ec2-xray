@@ -1,148 +1,168 @@
-# ローカル環境でのAWS X-Ray設定ガイド
+# ローカル環境でのX-Ray設定
 
-このドキュメントでは、ローカル開発環境からAWS X-Rayにトレースデータを送信するための設定手順を説明します。
+このガイドでは、ローカル開発環境でOpenTelemetryからAWS X-Rayにトレースを送信する設定について説明します。
 
-## 📋 **前提条件**
+## 🎯 概要
 
-### 1. AWS認証情報の準備
+ローカル環境では、OpenTelemetry CollectorがAWS X-Ray APIに直接トレースを送信します。
 
-以下のいずれかの方法でAWS認証情報を準備してください：
+```
+Laravel App → OpenTelemetry → OTel Collector → AWS X-Ray API
+```
 
-#### 方法1: AWS CLI設定
+## ⚠️ 重要な注意事項
+
+### 1. 環境変数の設定が必須
+**最重要**: AWS認証情報を正しく設定しないと、X-Rayエクスポーターが初期化されません。
+
+### 2. Docker Composeの環境変数優先順位
+Docker Composeでは以下の優先順位で環境変数が適用されます：
+1. **システムの環境変数**（最優先）
+2. **docker-compose.ymlのenvironmentセクション**
+3. **`.env`ファイル**（最低優先）
+
+### 3. X-Rayエクスポーターの制限
+- **トレースのみサポート**: メトリクスとログは送信できません
+- **環境変数形式**: `OTEL_EXPORTERS=debug,awsxray`（配列形式は無効）
+
+## 🔧 設定手順
+
+### ステップ1: AWS認証情報の設定
+
+#### 1.1 AWS CLIの設定確認
 ```bash
-# AWS CLIのインストール（未インストールの場合）
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip
-sudo ./aws/install
+# AWS CLIが設定されているか確認
+aws sts get-caller-identity
 
-# AWS認証情報の設定
-aws configure
+# 必要な権限の確認
+aws xray get-sampling-rules
 ```
 
-#### 方法2: 環境変数での設定
+#### 1.2 認証情報の取得
 ```bash
-# PowerShellの場合
-$env:AWS_ACCESS_KEY_ID="your-access-key-id"
-$env:AWS_SECRET_ACCESS_KEY="your-secret-access-key"
-$env:AWS_DEFAULT_REGION="ap-northeast-1"
-
-# Bashの場合
-export AWS_ACCESS_KEY_ID="your-access-key-id"
-export AWS_SECRET_ACCESS_KEY="your-secret-access-key"
-export AWS_DEFAULT_REGION="ap-northeast-1"
+# AWS CLIから認証情報を取得
+aws configure get aws_access_key_id
+aws configure get aws_secret_access_key
+aws configure get region
 ```
 
-### 2. 必要なAWS権限
-
-使用するAWSアカウントに以下の権限が必要です：
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "xray:PutTraceSegments",
-        "xray:PutTelemetryRecords",
-        "xray:GetSamplingRules",
-        "xray:GetSamplingTargets",
-        "xray:GetSamplingStatisticSummaries"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-## 🔧 **設定手順**
-
-### 1. 環境変数ファイルの作成
-
-プロジェクトルートに`.env`ファイルを作成：
-
+#### 1.3 .envファイルの設定
 ```env
-# 基本設定
-APP_NAME=Laravel
-APP_ENV=local
-APP_KEY=base64:your-app-key-here
-APP_DEBUG=true
-APP_URL=http://localhost
-
-# データベース設定
-DB_CONNECTION=pgsql
-DB_HOST=db
-DB_PORT=5432
-DB_DATABASE=laravel
-DB_USERNAME=user
-DB_PASSWORD=pass
-
-# AWS設定（実際の値に置き換えてください）
+# AWS設定（必須）
 AWS_ACCESS_KEY_ID=your-access-key-id
 AWS_SECRET_ACCESS_KEY=your-secret-access-key
 AWS_DEFAULT_REGION=ap-northeast-1
 
-# OpenTelemetry設定
-OTEL_SERVICE_NAME=laravel-app
-OTEL_SERVICE_VERSION=1.0.0
-OTEL_ENVIRONMENT=local
-OTEL_RESOURCE_ATTRIBUTES=service.name=laravel-app,service.version=1.0.0,deployment.environment=local
-
-# OpenTelemetry Collector設定
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http/json
-OTEL_TRACES_ENABLED=true
-OTEL_TRACES_EXPORTER=otlp
-OTEL_METRICS_ENABLED=true
-OTEL_METRICS_EXPORTER=otlp
-OTEL_LOGS_ENABLED=true
-OTEL_LOGS_EXPORTER=otlp
-
-# X-Ray設定（ローカル環境用）
+# X-Ray設定
 OTEL_XRAY_ENABLED=true
 OTEL_XRAY_LOCAL_MODE=false
 OTEL_XRAY_ENDPOINT=
-# 注意：OTEL_EXPORTERS設定は文字列形式で指定（配列形式[debug, awsxray]は無効）
+
+# エクスポーター設定（重要：配列形式は無効）
 OTEL_EXPORTERS=debug,awsxray
-
-# セッション設定
-SESSION_DRIVER=database
-SESSION_LIFETIME=120
-
-# その他設定
-LOG_CHANNEL=stack
-LOG_LEVEL=debug
-BROADCAST_DRIVER=log
-CACHE_DRIVER=file
-FILESYSTEM_DISK=local
-QUEUE_CONNECTION=sync
 ```
 
-### 🚨 **重要な注意点**
+### ステップ2: Docker Compose設定
 
-#### **AWS認証情報の設定**
-- **Docker環境の場合**: .envファイルに`AWS_ACCESS_KEY_ID`と`AWS_SECRET_ACCESS_KEY`の明示的な設定が必要
-- **理由**: Docker内のOTel CollectorはホストのAWS CLI設定を直接参照できないため
-- **セキュリティ**: .envファイルは.gitignoreに含まれており、Gitにコミットされません
-
-#### **OTEL_EXPORTERS設定の形式**
-- **正しい形式**: `OTEL_EXPORTERS=debug,awsxray`
-- **間違った形式**: `OTEL_EXPORTERS=[debug, awsxray]`（配列形式は無効）
-- **理由**: .envファイルでは文字列形式でのみ指定可能
-
-#### **X-Rayエクスポーターの制限**
-- **対応データ**: トレースのみ
-- **非対応データ**: メトリクス、ログ
-- **設定**: OTel Collectorでは、X-Rayエクスポーターをトレースパイプラインでのみ使用
-- **メトリクス・ログ**: debugエクスポーターのみ使用
-
-### 🔧 **OTel Collector設定の確認**
-
-`docker/otel-collector/otel-collector-config.yaml`が以下のように設定されていることを確認してください：
-
+#### 2.1 docker-compose.ymlの設定
 ```yaml
+services:
+  app:
+    # ... 他の設定 ...
+    env_file:
+      - .env
+    environment:
+      - PHP_IDE_CONFIG=serverName=laravel-app
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./docker/otel-collector/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8888:8888"
+      - "13133:13133"
+    networks:
+      - laravel
+    env_file:
+      - .env
+    environment:
+      # 環境設定
+      - OTEL_ENVIRONMENT=${OTEL_ENVIRONMENT:-docker}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-laravel-app}
+      
+      # AWS設定（システム環境変数を上書き）
+      - AWS_DEFAULT_REGION=ap-northeast-1
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      
+      # X-Ray設定
+      - OTEL_XRAY_LOCAL_MODE=${OTEL_XRAY_LOCAL_MODE:-false}
+      - OTEL_XRAY_ENDPOINT=${OTEL_XRAY_ENDPOINT:-}
+      
+      # エクスポーター設定
+      - OTEL_EXPORTERS=${OTEL_EXPORTERS:-debug,awsxray}
+```
+
+#### 2.2 重要なポイント
+- **env_file**: `.env`ファイルを明示的に指定
+- **AWS_DEFAULT_REGION**: システムの環境変数を上書きするため強制指定
+- **env_file + environment**: 両方を使用して確実に設定を適用
+
+### ステップ3: OTel Collector設定
+
+#### 3.1 otel-collector-config.yamlの設定
+```yaml
+# docker/otel-collector/otel-collector-config.yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+    send_batch_max_size: 1024
+
+  resource:
+    attributes:
+      - key: service.name
+        value: ${env:OTEL_SERVICE_NAME}
+        action: upsert
+      - key: deployment.environment
+        value: ${env:OTEL_ENVIRONMENT}
+        action: upsert
+
+exporters:
+  debug:
+    verbosity: detailed
+
+  # AWS X-Ray exporter（最小限の設定）
+  awsxray:
+    region: ap-northeast-1
+    local_mode: false
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  pprof:
+    endpoint: 0.0.0.0:1777
+  zpages:
+    endpoint: 0.0.0.0:55679
+
 service:
   extensions: [health_check, pprof, zpages]
+  telemetry:
+    logs:
+      level: debug  # デバッグログを有効化
   pipelines:
     traces:
       receivers: [otlp]
@@ -151,199 +171,131 @@ service:
     metrics:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: [debug]           # メトリクスではX-Ray使用不可
+      exporters: [debug]           # X-Rayは使用不可
     logs:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: [debug]           # ログではX-Ray使用不可
+      exporters: [debug]           # X-Rayは使用不可
 ```
 
-### 2. Docker環境の起動
+#### 3.2 重要なポイント
+- **traceパイプラインのみ**: X-Rayエクスポーターはトレースのみをサポート
+- **debugログレベル**: 問題診断のためデバッグログを有効化
+- **最小限の設定**: X-Rayエクスポーターは`region`と`local_mode`のみ指定
 
+## 🧪 動作確認
+
+### ステップ1: コンテナの起動
 ```bash
-# コンテナをビルド
-docker-compose build
+# 設定を確認
+docker-compose config | Select-String -Pattern 'AWS_'
 
-# コンテナを起動
+# 期待される出力:
+# AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+# AWS_DEFAULT_REGION: ap-northeast-1
+# AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+# コンテナの起動
 docker-compose up -d
-
-# Laravel環境のセットアップ
-docker-compose exec app composer install
-docker-compose exec app php artisan key:generate
-docker-compose exec app php artisan migrate
 ```
 
-### 3. 動作確認
-
+### ステップ2: X-Rayエクスポーターの初期化確認
 ```bash
-# アプリケーションの動作確認
-curl http://localhost/
+# X-Rayエクスポーターの初期化ログ確認
+docker-compose logs otel-collector | Select-String -Pattern 'awsxray'
 
-# APIエンドポイントの確認
-curl http://localhost/api/items
+# 期待される出力:
+# "otelcol.component.id": "awsxray", "otelcol.component.kind": "exporter"
+# "region": "ap-northeast-1"
+```
 
-# OpenTelemetryテストコマンド
+### ステップ3: トレースの送信確認
+```bash
+# OpenTelemetryテスト実行
 docker-compose exec app php artisan otel:test
+
+# X-Rayエクスポーターのトレース送信ログ確認
+docker-compose logs otel-collector | Select-String -Pattern 'TracesExporter'
+
+# 期待される出力:
+# TracesExporter ... "#spans": 10
+# request: &{TraceSegmentDocuments:[...]}
+# response: &{UnprocessedTraceSegments:[] ...}
 ```
 
-## 🔍 **X-Rayでのトレース確認**
-
-### 1. AWS X-Rayコンソールにアクセス
-
-1. AWS Management Consoleにログイン
-2. X-Rayサービスを選択
-3. 「Traces」または「Service map」を確認
-
-### 2. 期待されるトレースデータ
-
-以下のような情報が表示されるはずです：
-
-```json
-{
-  "id": "1-64f8b123-abcdef1234567890",
-  "duration": 0.245,
-  "segments": [
-    {
-      "id": "abc123def456",
-      "name": "laravel-app",
-      "start_time": "2024-01-01T12:00:00.000Z",
-      "end_time": "2024-01-01T12:00:00.245Z",
-      "http": {
-        "request": {
-          "method": "GET",
-          "url": "http://localhost/api/items"
-        },
-        "response": {
-          "status": 200
-        }
-      },
-      "subsegments": [
-        {
-          "id": "def456ghi789",
-          "name": "db.query",
-          "start_time": "2024-01-01T12:00:00.100Z",
-          "end_time": "2024-01-01T12:00:00.150Z",
-          "sql": {
-            "query": "SELECT * FROM items"
-          }
-        }
-      ]
-    }
-  ]
-}
-```
-
-### 3. サービスマップ
-
-- **laravel-app**: メインアプリケーション
-- **PostgreSQL**: データベース
-- **HTTP**: 外部API呼び出し（存在する場合）
-
-## 🐛 **トラブルシューティング**
-
-### 1. トレースが表示されない場合
-
-#### OpenTelemetry Collectorのログを確認
-
+### ステップ4: APIテスト
 ```bash
-# Collectorのログを確認
-docker-compose logs otel-collector
+# Windows PowerShell
+.\test_api.ps1
 
-# 成功時のログ例
-2024-01-01T12:00:00.000Z info exporters/awsxray/exporter.go:123 Successfully sent trace to X-Ray
+# Linux/macOS
+./test_api.sh
 ```
 
-#### Laravel側の設定確認
+### ステップ5: X-Rayコンソールでの確認
+[AWS X-Rayコンソール](https://console.aws.amazon.com/xray/home?region=ap-northeast-1#/traces)でトレースを確認してください。
 
+## 🔧 トラブルシューティング
+
+### 問題1: X-Rayエクスポーターが初期化されない
+
+#### 症状
 ```bash
-# 設定値の確認
-docker-compose exec app php artisan config:show opentelemetry
+# X-Rayエクスポーターのログが見つからない
+docker-compose logs otel-collector | Select-String -Pattern 'awsxray'
+# 出力なし
 ```
-
-### 2. AWS認証エラーの場合
-
-#### 認証情報の確認
-
-```bash
-# AWS認証情報の確認
-aws sts get-caller-identity
-
-# 期待される出力
-{
-    "UserId": "AIDABC123DEFGHIJKLMN",
-    "Account": "123456789012",
-    "Arn": "arn:aws:iam::123456789012:user/your-username"
-}
-```
-
-#### 権限の確認
-
-```bash
-# X-Ray権限の確認
-aws xray get-sampling-rules
-
-# 成功時は空の配列が返される
-{
-    "SamplingRuleRecords": []
-}
-```
-
-### 3. OTel Collectorが再起動を繰り返す場合
-
-#### 現象
-```
-The "AWS_ACCESS_KEY_ID" variable is not set. Defaulting to a blank string.
-The "AWS_SECRET_ACCESS_KEY" variable is not set. Defaulting to a blank string.
-```
-
-#### 原因
-- .envファイルにAWS認証情報が設定されていない
-- Docker環境ではホストのAWS CLI設定を参照できない
 
 #### 解決方法
-```env
-# .envファイルに以下を追加
-AWS_ACCESS_KEY_ID=your-access-key-id
-AWS_SECRET_ACCESS_KEY=your-secret-access-key
-AWS_DEFAULT_REGION=ap-northeast-1
-```
+1. **環境変数の確認**
+   ```bash
+   docker-compose config | Select-String -Pattern 'AWS_'
+   ```
 
-### 4. X-Rayエクスポーターでエラーが発生する場合
+2. **システム環境変数の確認**
+   ```bash
+   $env:AWS_DEFAULT_REGION
+   # us-east-1が出力される場合、docker-compose.ymlで強制指定が必要
+   ```
 
-#### 現象
-```
-Error: failed to build pipelines: failed to create "awsxray" exporter for data type "logs": telemetry type is not supported
-Error: failed to build pipelines: failed to create "awsxray" exporter for data type "metrics": telemetry type is not supported
-```
+3. **コンテナの再起動**
+   ```bash
+   docker-compose down
+   docker-compose up -d
+   ```
 
-#### 原因
-- AWS X-Rayエクスポーターはトレースのみをサポート
-- メトリクスとログでX-Rayエクスポーターを使用している
+### 問題2: トレースが送信されない
+
+#### 症状
+```bash
+# TracesExporterのログが見つからない
+docker-compose logs otel-collector | Select-String -Pattern 'TracesExporter'
+# 出力なし
+```
 
 #### 解決方法
-`docker/otel-collector/otel-collector-config.yaml`を以下のように修正：
-```yaml
-service:
-  pipelines:
-    traces:
-      exporters: [debug, awsxray]  # X-Rayはトレースのみ
-    metrics:
-      exporters: [debug]           # X-Rayは使用不可
-    logs:
-      exporters: [debug]           # X-Rayは使用不可
-```
+1. **AWS認証情報の確認**
+   ```bash
+   aws sts get-caller-identity
+   ```
 
-### 5. Laravel環境変数のパースエラーの場合
+2. **X-Ray権限の確認**
+   ```bash
+   aws xray get-sampling-rules
+   ```
 
-#### 現象
+3. **詳細ログの確認**
+   ```bash
+   docker-compose logs otel-collector | Select-String -Pattern 'error|Error|failed|Failed'
+   ```
+
+### 問題3: 環境変数形式エラー
+
+#### 症状
 ```
 The environment file is invalid!
 Failed to parse dotenv file. Encountered unexpected whitespace at [[debug, awsxray]].
 ```
-
-#### 原因
-- OTEL_EXPORTERS設定で配列形式を使用している
-- .envファイルでは配列形式は無効
 
 #### 解決方法
 ```env
@@ -354,126 +306,30 @@ OTEL_EXPORTERS=[debug, awsxray]
 OTEL_EXPORTERS=debug,awsxray
 ```
 
-### 6. 設定修正後の確認手順
+## 📋 チェックリスト
 
-```bash
-# 1. コンテナの停止
-docker-compose down
+設定完了前に以下を確認してください：
 
-# 2. .envファイルの設定確認
-cat .env | grep -E "(AWS|OTEL)"
+### 環境変数設定
+- [ ] `.env`ファイルにAWS認証情報が設定されている
+- [ ] `docker-compose.yml`で`env_file: - .env`が指定されている
+- [ ] `AWS_DEFAULT_REGION=ap-northeast-1`が強制指定されている
+- [ ] `OTEL_EXPORTERS=debug,awsxray`（配列形式ではない）
 
-# 3. コンテナの再起動
-docker-compose up -d
+### X-Rayエクスポーター設定
+- [ ] X-Rayエクスポーターがトレースパイプラインのみに設定されている
+- [ ] メトリクスとログパイプラインからX-Rayエクスポーターが除外されている
+- [ ] OTel Collectorでデバッグログが有効化されている
 
-# 4. Collectorログの確認
-docker-compose logs otel-collector
+### 動作確認
+- [ ] `docker-compose config`でAWS環境変数が正しく表示される
+- [ ] OTel Collectorログで`awsxray`エクスポーターの初期化が確認できる
+- [ ] `TracesExporter`ログでトレース送信が確認できる
+- [ ] AWS X-Rayコンソールでトレースが確認できる
 
-# 5. Laravelアプリケーションの確認
-docker-compose exec app php artisan --version
+## 🔗 関連リンク
 
-# 6. APIテストの実行
-curl http://localhost/api/items
-
-# 7. X-Rayコンソールでトレースの確認
-# https://console.aws.amazon.com/xray/home?region=ap-northeast-1#/traces
-```
-
-### 5. パフォーマンスの問題
-
-#### バッチ処理の最適化
-
-OpenTelemetry Collectorの設定で調整可能：
-
-```yaml
-processors:
-  batch:
-    timeout: 1s
-    send_batch_size: 1024      # バッチサイズを調整
-    send_batch_max_size: 1024  # 最大バッチサイズを調整
-```
-
-#### サンプリング設定の調整
-
-```env
-# サンプリング率の調整（0.1 = 10%）
-OTEL_TRACES_SAMPLER_RATIO=0.1
-```
-
-### 4. よくあるエラーと解決方法
-
-#### エラー1: "Could not load credentials"
-
-```bash
-# 解決方法: AWS認証情報を正しく設定
-export AWS_ACCESS_KEY_ID="your-access-key-id"
-export AWS_SECRET_ACCESS_KEY="your-secret-access-key"
-```
-
-#### エラー2: "InvalidSignatureException"
-
-```bash
-# 解決方法: 時刻同期の確認
-sudo ntpdate -s time.nist.gov
-```
-
-#### エラー3: "AccessDenied"
-
-```bash
-# 解決方法: X-Ray権限の確認・追加
-aws iam attach-user-policy --user-name your-username --policy-arn arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
-```
-
-## 💡 **最適化のヒント**
-
-### 1. 開発環境での設定
-
-```env
-# 開発時は詳細ログを有効化
-OTEL_LOG_LEVEL=debug
-OTEL_TRACES_SAMPLER=always_on
-OTEL_TRACES_SAMPLER_RATIO=1.0
-```
-
-### 2. 本番環境での設定
-
-```env
-# 本番環境では適切なサンプリング設定
-OTEL_LOG_LEVEL=info
-OTEL_TRACES_SAMPLER=parentbased_traceidratio
-OTEL_TRACES_SAMPLER_RATIO=0.1
-```
-
-### 3. コスト最適化
-
-- サンプリングレートを調整してトレース量を制御
-- 不要な属性を除外してデータ量を削減
-- バッチサイズを最適化してAPI呼び出し回数を削減
-
-## 📊 **監視とアラート**
-
-### 1. CloudWatchメトリクス
-
-X-Rayは以下のメトリクスを提供：
-
-- **TracesReceived**: 受信したトレース数
-- **TracesProcessed**: 処理されたトレース数
-- **LatencyHigh**: 高レイテンシのトレース数
-- **ErrorRate**: エラー率
-
-### 2. アラート設定
-
-```bash
-# CloudWatch Alarmの設定例
-aws cloudwatch put-metric-alarm \
-    --alarm-name "X-Ray-High-Error-Rate" \
-    --alarm-description "X-Ray error rate is high" \
-    --metric-name ErrorRate \
-    --namespace AWS/X-Ray \
-    --statistic Average \
-    --period 300 \
-    --threshold 5.0 \
-    --comparison-operator GreaterThanThreshold
-```
-
-これでローカル環境からAWS X-Rayへのトレースデータ送信が設定完了です！ 
+- [X-Rayトラブルシューティングガイド](XRAY_TROUBLESHOOTING_GUIDE.md)
+- [OpenTelemetry監視ガイド](OPENTELEMETRY_MONITORING_GUIDE.md)
+- [AWS CLI設定ガイド](AWS_CLI_SETUP_GUIDE.md)
+- [AWS X-Rayコンソール](https://console.aws.amazon.com/xray/home?region=ap-northeast-1#/traces) 
