@@ -238,48 +238,92 @@ sudo chmod -R 775 /var/www/laravel12-otel-ec2-xray/bootstrap/cache
 EC2でX-Rayに直接送信するための設定：
 
 ```bash
-# OpenTelemetry Collectorの設定ファイル作成
-sudo tee /etc/otel-collector-config.yaml > /dev/null <<'EOF'
+# プロジェクトのEC2用設定ファイルを使用
+sudo cp /var/www/laravel12-otel-ec2-xray/docker/otel-collector/otel-collector-config.ec2.yaml /etc/otel-collector-config.yaml
+
+# 権限の設定
+sudo chown root:root /etc/otel-collector-config.yaml
+sudo chmod 644 /etc/otel-collector-config.yaml
+```
+
+### 設定内容の説明
+
+EC2環境では以下の設定を使用します：
+
+1. **local_mode: true** - X-Ray DaemonではなくX-Ray APIに直接送信
+2. **IAMロール認証** - AWS認証情報は不要
+3. **リージョン指定** - ap-northeast-1を使用
+4. **トレース属性の最適化** - EC2メタデータを自動付与
+
+### 設定ファイルの内容
+
+```yaml
 receivers:
   otlp:
     protocols:
       grpc:
-        endpoint: 127.0.0.1:4317
+        endpoint: 0.0.0.0:4317
       http:
-        endpoint: 127.0.0.1:4318
+        endpoint: 0.0.0.0:4318
 
 processors:
   batch:
     timeout: 1s
     send_batch_size: 50
-  
+    send_batch_max_size: 100
+
   resource:
     attributes:
+    - key: environment
+      value: production
+      action: upsert
+    - key: service.name
+      value: laravel-app
+      action: upsert
     - key: cloud.provider
       value: aws
-      action: insert
+      action: upsert
     - key: cloud.platform
       value: aws_ec2
-      action: insert
+      action: upsert
+    - key: cloud.region
+      value: ap-northeast-1
+      action: upsert
 
 exporters:
   awsxray:
     region: ap-northeast-1
-    no_verify_ssl: false
     local_mode: true
+    endpoint: ""
+    index_all_attributes: true
+    no_verify_ssl: false
+    
+  debug:
+    verbosity: normal
 
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
+  pprof:
+    endpoint: 0.0.0.0:1777
+  zpages:
+    endpoint: 0.0.0.0:55679
 
 service:
-  extensions: [health_check]
+  extensions: [health_check, pprof, zpages]
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: [awsxray]
-EOF
+      exporters: [awsxray, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [awsxray, debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [awsxray, debug]
 ```
 
 ### OpenTelemetry Collectorのインストールと起動

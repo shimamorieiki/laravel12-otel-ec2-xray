@@ -9,15 +9,16 @@ receivers:
 processors:
   batch:
     timeout: 1s
-    send_batch_size: 1024
+    send_batch_size: 50
+    send_batch_max_size: 100
 
   resource:
     attributes:
       - key: environment
-        value: ${env:OTEL_ENVIRONMENT}
+        value: production
         action: upsert
       - key: service.name
-        value: ${env:OTEL_SERVICE_NAME}
+        value: laravel-app
         action: upsert
       - key: cloud.provider
         value: aws
@@ -25,19 +26,22 @@ processors:
       - key: cloud.platform
         value: aws_ec2
         action: upsert
+      - key: cloud.region
+        value: ap-northeast-1
+        action: upsert
 
 exporters:
-  # Debug exporter（開発用）
-  debug:
-    verbosity: detailed
-
-  # AWS X-Ray exporter（本番・ローカル共用）
+  # AWS X-Ray exporter（EC2環境用）
   awsxray:
-    region: ${env:AWS_DEFAULT_REGION}
-    local_mode: ${env:OTEL_XRAY_LOCAL_MODE}
-    endpoint: ${env:OTEL_XRAY_ENDPOINT}
+    region: ap-northeast-1
+    local_mode: true
+    endpoint: ""
     index_all_attributes: true
     no_verify_ssl: false
+
+  # Debug exporter（デバッグ用）
+  debug:
+    verbosity: normal
 
 extensions:
   health_check:
@@ -53,12 +57,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: ${env:OTEL_EXPORTERS}
+      exporters: [awsxray, debug]
     metrics:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: ${env:OTEL_EXPORTERS}
+      exporters: [awsxray, debug]
     logs:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: ${env:OTEL_EXPORTERS}
+      exporters: [awsxray, debug]

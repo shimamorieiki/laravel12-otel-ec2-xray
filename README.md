@@ -123,12 +123,60 @@ curl -X DELETE http://localhost/api/items/1
 
 - `config/opentelemetry.php` - OpenTelemetry設定
 - `.env` - 環境変数による設定
+- `docker/otel-collector/otel-collector-config.yaml` - ローカル用Collector設定
+- `docker/otel-collector/otel-collector-config.ec2.yaml` - EC2用Collector設定
+
+### X-Ray統合
+
+#### ローカル環境での設定
+
+1. **AWS認証情報の設定**
+   ```bash
+   # 環境変数で設定
+   export AWS_ACCESS_KEY_ID="your-access-key-id"
+   export AWS_SECRET_ACCESS_KEY="your-secret-access-key"
+   export AWS_DEFAULT_REGION="ap-northeast-1"
+   ```
+
+2. **`.env`ファイルの設定**
+   ```env
+   # X-Ray設定
+   OTEL_XRAY_ENABLED=true
+   OTEL_XRAY_LOCAL_MODE=false
+   OTEL_EXPORTERS=[debug, awsxray]
+   
+   # AWS設定
+   AWS_ACCESS_KEY_ID=your-access-key-id
+   AWS_SECRET_ACCESS_KEY=your-secret-access-key
+   AWS_DEFAULT_REGION=ap-northeast-1
+   ```
+
+3. **詳細な設定手順**
+   詳細は [LOCAL_XRAY_SETUP.md](docs/LOCAL_XRAY_SETUP.md) を参照してください。
+
+#### EC2環境での設定
+
+1. **IAMロールの設定**
+   - `AWSXRayDaemonWriteAccess` ポリシーをEC2にアタッチ
+
+2. **OpenTelemetry Collectorの設定**
+   - EC2専用の設定ファイル（`otel-collector-config.ec2.yaml`）を使用
+   - `local_mode: true` でX-Ray APIに直接送信
+
+3. **詳細な設定手順**
+   詳細は [EC2_SETUP.md](docs/EC2_SETUP.md) を参照してください。
 
 ### テストコマンド
 
 ```bash
 # OpenTelemetry動作確認
 docker-compose exec app php artisan otel:test
+
+# X-Ray Collectorのログ確認
+docker-compose logs otel-collector
+
+# AWS認証情報の確認
+aws sts get-caller-identity
 ```
 
 ## 🚢 本番環境へのデプロイ
