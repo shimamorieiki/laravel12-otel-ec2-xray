@@ -25,7 +25,7 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_PRIVATE_KEY }}
           port: 22
-          timeout: 300
+          timeout: 300s
           script: |
             set -e
 
@@ -141,6 +141,7 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_PRIVATE_KEY }}
           port: 22
+          timeout: 30s
           script: |
             echo "=== Deployment Summary ==="
             echo "Deployment Status: ${{ job.status }}"
