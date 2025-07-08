@@ -172,10 +172,9 @@ DB_DATABASE=laravel
 DB_USERNAME=user
 DB_PASSWORD=pass
 
-# AWS設定（AWS CLIが自動で読み込む）
-# 以下は設定不要（AWS CLIが自動で使用）
-# AWS_ACCESS_KEY_ID=（不要）
-# AWS_SECRET_ACCESS_KEY=（不要）
+# AWS設定（重要：Docker環境では.envファイルに記載が必要）
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
 AWS_DEFAULT_REGION=ap-northeast-1
 
 # OpenTelemetry設定
@@ -197,7 +196,9 @@ OTEL_LOGS_EXPORTER=otlp
 # X-Ray設定
 OTEL_XRAY_ENABLED=true
 OTEL_XRAY_LOCAL_MODE=false
-OTEL_EXPORTERS=[debug, awsxray]
+OTEL_XRAY_ENDPOINT=
+# 注意：OTEL_EXPORTERS設定は文字列形式で指定（配列形式[debug, awsxray]は無効）
+OTEL_EXPORTERS=debug,awsxray
 
 # セッション設定
 SESSION_DRIVER=database
@@ -211,6 +212,24 @@ CACHE_DRIVER=file
 FILESYSTEM_DISK=local
 QUEUE_CONNECTION=sync
 ```
+
+### **⚠️ 重要な注意点**
+
+#### **AWS認証情報の設定**
+- **Docker環境の場合**: .envファイルに`AWS_ACCESS_KEY_ID`と`AWS_SECRET_ACCESS_KEY`の明示的な設定が必要
+- **理由**: Docker内のOTel CollectorはホストのAWS CLI設定を直接参照できないため
+- **セキュリティ**: .envファイルは.gitignoreに含まれており、Gitにコミットされません
+
+#### **OTEL_EXPORTERS設定の形式**
+- **正しい形式**: `OTEL_EXPORTERS=debug,awsxray`
+- **間違った形式**: `OTEL_EXPORTERS=[debug, awsxray]`（配列形式は無効）
+- **理由**: .envファイルでは文字列形式でのみ指定可能
+
+#### **X-Rayエクスポーターの制限**
+- **対応データ**: トレースのみ
+- **非対応データ**: メトリクス、ログ
+- **設定**: OTel Collectorでは、X-Rayエクスポーターをトレースパイプラインでのみ使用
+- **メトリクス・ログ**: debugエクスポーターのみ使用
 
 ### **Docker環境の起動**
 
@@ -334,7 +353,73 @@ aws sts get-caller-identity --profile laravel-project
 
 ## 🐛 **トラブルシューティング**
 
-### **問題1: AWS CLIが認識されない**
+### **問題1: OTel Collectorが再起動を繰り返す**
+
+**現象**
+```
+The "AWS_ACCESS_KEY_ID" variable is not set. Defaulting to a blank string.
+The "AWS_SECRET_ACCESS_KEY" variable is not set. Defaulting to a blank string.
+```
+
+**原因**
+- .envファイルにAWS認証情報が設定されていない
+- Docker環境ではホストのAWS CLI設定を参照できない
+
+**解決方法**
+```env
+# .envファイルに以下を追加
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+AWS_DEFAULT_REGION=ap-northeast-1
+```
+
+### **問題2: X-Rayエクスポーターでエラーが発生**
+
+**現象**
+```
+Error: failed to build pipelines: failed to create "awsxray" exporter for data type "logs": telemetry type is not supported
+Error: failed to build pipelines: failed to create "awsxray" exporter for data type "metrics": telemetry type is not supported
+```
+
+**原因**
+- AWS X-Rayエクスポーターはトレースのみをサポート
+- メトリクスとログでX-Rayエクスポーターを使用している
+
+**解決方法**
+`docker/otel-collector/otel-collector-config.yaml`を以下のように修正：
+```yaml
+service:
+  pipelines:
+    traces:
+      exporters: [debug, awsxray]  # X-Rayはトレースのみ
+    metrics:
+      exporters: [debug]           # X-Rayは使用不可
+    logs:
+      exporters: [debug]           # X-Rayは使用不可
+```
+
+### **問題3: Laravel環境変数のパースエラー**
+
+**現象**
+```
+The environment file is invalid!
+Failed to parse dotenv file. Encountered unexpected whitespace at [[debug, awsxray]].
+```
+
+**原因**
+- OTEL_EXPORTERS設定で配列形式を使用している
+- .envファイルでは配列形式は無効
+
+**解決方法**
+```env
+# 間違った形式
+OTEL_EXPORTERS=[debug, awsxray]
+
+# 正しい形式
+OTEL_EXPORTERS=debug,awsxray
+```
+
+### **問題4: AWS CLIが認識されない**
 
 **現象**
 ```powershell
@@ -351,7 +436,7 @@ $env:PATH
 $env:PATH += ";C:\Program Files\Amazon\AWSCLIV2"
 ```
 
-### **問題2: 認証情報エラー**
+### **問題5: 認証情報エラー**
 
 **現象**
 ```powershell
@@ -368,7 +453,7 @@ Get-Content $env:USERPROFILE\.aws\credentials
 Get-Content $env:USERPROFILE\.aws\config
 ```
 
-### **問題3: X-Ray権限エラー**
+### **問題6: X-Ray権限エラー**
 
 **現象**
 ```powershell
@@ -380,7 +465,7 @@ AccessDenied: User is not authorized to perform: xray:PutTraceSegments
 2. 「許可」タブで「許可を追加」
 3. 「AWSXRayDaemonWriteAccess」ポリシーを追加
 
-### **問題4: Docker環境でのAWS認証**
+### **問題7: Docker環境でのAWS認証**
 
 **現象**
 ```

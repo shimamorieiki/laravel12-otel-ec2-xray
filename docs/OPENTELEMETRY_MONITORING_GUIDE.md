@@ -167,6 +167,58 @@ OTEL_LOGS_EXPORTER=otlp
 OTEL_TRACES_ENABLED=true
 OTEL_METRICS_ENABLED=true
 OTEL_LOGS_ENABLED=true
+
+# AWS設定（X-Ray使用時は必須）
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+AWS_DEFAULT_REGION=ap-northeast-1
+
+# X-Ray設定
+OTEL_XRAY_ENABLED=true
+OTEL_XRAY_LOCAL_MODE=false
+OTEL_XRAY_ENDPOINT=
+# 注意：OTEL_EXPORTERS設定は文字列形式で指定（配列形式[debug, awsxray]は無効）
+OTEL_EXPORTERS=debug,awsxray
+```
+
+### 🚨 **重要な注意点**
+
+#### **AWS認証情報の設定**
+- **Docker環境の場合**: .envファイルに`AWS_ACCESS_KEY_ID`と`AWS_SECRET_ACCESS_KEY`の明示的な設定が必要
+- **理由**: Docker内のOTel CollectorはホストのAWS CLI設定を直接参照できないため
+- **セキュリティ**: .envファイルは.gitignoreに含まれており、Gitにコミットされません
+
+#### **OTEL_EXPORTERS設定の形式**
+- **正しい形式**: `OTEL_EXPORTERS=debug,awsxray`
+- **間違った形式**: `OTEL_EXPORTERS=[debug, awsxray]`（配列形式は無効）
+- **理由**: .envファイルでは文字列形式でのみ指定可能
+
+#### **X-Rayエクスポーターの制限**
+- **対応データ**: トレースのみ
+- **非対応データ**: メトリクス、ログ
+- **設定**: OTel Collectorでは、X-Rayエクスポーターをトレースパイプラインでのみ使用
+- **メトリクス・ログ**: debugエクスポーターのみ使用
+
+### 🔧 **OTel Collector設定の確認**
+
+`docker/otel-collector/otel-collector-config.yaml`が以下のように設定されていることを確認してください：
+
+```yaml
+service:
+  extensions: [health_check, pprof, zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [debug, awsxray]  # X-Rayはトレースのみ
+    metrics:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [debug]           # メトリクスではX-Ray使用不可
+    logs:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [debug]           # ログではX-Ray使用不可
 ```
 
 ### 実装されている機能

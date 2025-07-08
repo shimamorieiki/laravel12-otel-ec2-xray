@@ -143,15 +143,22 @@ curl -X DELETE http://localhost/api/items/1
    # X-Ray設定
    OTEL_XRAY_ENABLED=true
    OTEL_XRAY_LOCAL_MODE=false
-   OTEL_EXPORTERS=[debug, awsxray]
+   OTEL_XRAY_ENDPOINT=
+   # 注意：OTEL_EXPORTERS設定は文字列形式で指定（配列形式[debug, awsxray]は無効）
+   OTEL_EXPORTERS=debug,awsxray
    
-   # AWS設定
+   # AWS設定（重要：Docker環境では.envファイルに記載が必要）
    AWS_ACCESS_KEY_ID=your-access-key-id
    AWS_SECRET_ACCESS_KEY=your-secret-access-key
    AWS_DEFAULT_REGION=ap-northeast-1
    ```
 
-3. **詳細な設定手順**
+3. **⚠️ 重要な注意点**
+   - **AWS認証情報**: Docker環境では.envファイルに明示的に設定が必要
+   - **OTEL_EXPORTERS形式**: 文字列形式で指定（配列形式は無効）
+   - **X-Rayエクスポーター**: トレースのみをサポート（メトリクス・ログは非対応）
+
+4. **詳細な設定手順**
    詳細は [LOCAL_XRAY_SETUP.md](docs/LOCAL_XRAY_SETUP.md) を参照してください。
 
 #### EC2環境での設定
@@ -178,6 +185,22 @@ docker-compose logs otel-collector
 # AWS認証情報の確認
 aws sts get-caller-identity
 ```
+
+## 📖 詳細ドキュメント
+
+### 設定ガイド
+- [AWS CLI設定ガイド](docs/AWS_CLI_SETUP_GUIDE.md) - AWS CLI設定と認証情報設定
+- [ローカルX-Ray設定](docs/LOCAL_XRAY_SETUP.md) - ローカル環境でのX-Ray設定
+- [OpenTelemetry監視ガイド](docs/OPENTELEMETRY_MONITORING_GUIDE.md) - 監視とログ確認方法
+
+### デプロイガイド
+- [AWSリソース設定](docs/AWS_RESOURCES_SETUP.md) - EC2、RDS、IAMロールの設定
+- [EC2設定ガイド](docs/EC2_SETUP.md) - EC2でのアプリケーション設定
+- [GitHub Actions Deploy](docs/GITHUB_ACTIONS_DEPLOY.md) - CI/CDパイプライン設定
+
+### トラブルシューティング
+- [X-Rayトラブルシューティング](docs/XRAY_TROUBLESHOOTING_GUIDE.md) - 問題解決と診断手順
+- [AWS認証情報設定](docs/AWS_CREDENTIALS_SETUP.md) - 認証情報の詳細設定方法
 
 ## 🚢 本番環境へのデプロイ
 

@@ -102,7 +102,8 @@ OTEL_LOGS_EXPORTER=otlp
 OTEL_XRAY_ENABLED=true
 OTEL_XRAY_LOCAL_MODE=false
 OTEL_XRAY_ENDPOINT=
-OTEL_EXPORTERS=[debug, awsxray]
+# 注意：OTEL_EXPORTERS設定は文字列形式で指定（配列形式[debug, awsxray]は無効）
+OTEL_EXPORTERS=debug,awsxray
 
 # セッション設定
 SESSION_DRIVER=database
@@ -115,6 +116,46 @@ BROADCAST_DRIVER=log
 CACHE_DRIVER=file
 FILESYSTEM_DISK=local
 QUEUE_CONNECTION=sync
+```
+
+### 🚨 **重要な注意点**
+
+#### **AWS認証情報の設定**
+- **Docker環境の場合**: .envファイルに`AWS_ACCESS_KEY_ID`と`AWS_SECRET_ACCESS_KEY`の明示的な設定が必要
+- **理由**: Docker内のOTel CollectorはホストのAWS CLI設定を直接参照できないため
+- **セキュリティ**: .envファイルは.gitignoreに含まれており、Gitにコミットされません
+
+#### **OTEL_EXPORTERS設定の形式**
+- **正しい形式**: `OTEL_EXPORTERS=debug,awsxray`
+- **間違った形式**: `OTEL_EXPORTERS=[debug, awsxray]`（配列形式は無効）
+- **理由**: .envファイルでは文字列形式でのみ指定可能
+
+#### **X-Rayエクスポーターの制限**
+- **対応データ**: トレースのみ
+- **非対応データ**: メトリクス、ログ
+- **設定**: OTel Collectorでは、X-Rayエクスポーターをトレースパイプラインでのみ使用
+- **メトリクス・ログ**: debugエクスポーターのみ使用
+
+### 🔧 **OTel Collector設定の確認**
+
+`docker/otel-collector/otel-collector-config.yaml`が以下のように設定されていることを確認してください：
+
+```yaml
+service:
+  extensions: [health_check, pprof, zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [debug, awsxray]  # X-Rayはトレースのみ
+    metrics:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [debug]           # メトリクスではX-Ray使用不可
+    logs:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [debug]           # ログではX-Ray使用不可
 ```
 
 ### 2. Docker環境の起動
@@ -247,7 +288,98 @@ aws xray get-sampling-rules
 }
 ```
 
-### 3. パフォーマンスの問題
+### 3. OTel Collectorが再起動を繰り返す場合
+
+#### 現象
+```
+The "AWS_ACCESS_KEY_ID" variable is not set. Defaulting to a blank string.
+The "AWS_SECRET_ACCESS_KEY" variable is not set. Defaulting to a blank string.
+```
+
+#### 原因
+- .envファイルにAWS認証情報が設定されていない
+- Docker環境ではホストのAWS CLI設定を参照できない
+
+#### 解決方法
+```env
+# .envファイルに以下を追加
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+AWS_DEFAULT_REGION=ap-northeast-1
+```
+
+### 4. X-Rayエクスポーターでエラーが発生する場合
+
+#### 現象
+```
+Error: failed to build pipelines: failed to create "awsxray" exporter for data type "logs": telemetry type is not supported
+Error: failed to build pipelines: failed to create "awsxray" exporter for data type "metrics": telemetry type is not supported
+```
+
+#### 原因
+- AWS X-Rayエクスポーターはトレースのみをサポート
+- メトリクスとログでX-Rayエクスポーターを使用している
+
+#### 解決方法
+`docker/otel-collector/otel-collector-config.yaml`を以下のように修正：
+```yaml
+service:
+  pipelines:
+    traces:
+      exporters: [debug, awsxray]  # X-Rayはトレースのみ
+    metrics:
+      exporters: [debug]           # X-Rayは使用不可
+    logs:
+      exporters: [debug]           # X-Rayは使用不可
+```
+
+### 5. Laravel環境変数のパースエラーの場合
+
+#### 現象
+```
+The environment file is invalid!
+Failed to parse dotenv file. Encountered unexpected whitespace at [[debug, awsxray]].
+```
+
+#### 原因
+- OTEL_EXPORTERS設定で配列形式を使用している
+- .envファイルでは配列形式は無効
+
+#### 解決方法
+```env
+# 間違った形式
+OTEL_EXPORTERS=[debug, awsxray]
+
+# 正しい形式
+OTEL_EXPORTERS=debug,awsxray
+```
+
+### 6. 設定修正後の確認手順
+
+```bash
+# 1. コンテナの停止
+docker-compose down
+
+# 2. .envファイルの設定確認
+cat .env | grep -E "(AWS|OTEL)"
+
+# 3. コンテナの再起動
+docker-compose up -d
+
+# 4. Collectorログの確認
+docker-compose logs otel-collector
+
+# 5. Laravelアプリケーションの確認
+docker-compose exec app php artisan --version
+
+# 6. APIテストの実行
+curl http://localhost/api/items
+
+# 7. X-Rayコンソールでトレースの確認
+# https://console.aws.amazon.com/xray/home?region=ap-northeast-1#/traces
+```
+
+### 5. パフォーマンスの問題
 
 #### バッチ処理の最適化
 

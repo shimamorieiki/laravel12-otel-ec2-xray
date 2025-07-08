@@ -31,7 +31,7 @@ exporters:
   debug:
     verbosity: detailed
 
-  # AWS X-Ray exporter（本番・ローカル共用）
+  # AWS X-Ray exporter（トレースのみ）
   awsxray:
     region: ${env:AWS_DEFAULT_REGION}
     local_mode: ${env:OTEL_XRAY_LOCAL_MODE}
@@ -53,12 +53,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: ${env:OTEL_EXPORTERS}
+      exporters: [debug, awsxray]
     metrics:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: ${env:OTEL_EXPORTERS}
+      exporters: [debug]
     logs:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: ${env:OTEL_EXPORTERS}
+      exporters: [debug]
