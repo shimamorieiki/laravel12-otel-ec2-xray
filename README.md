@@ -1,6 +1,49 @@
-# Laravel 12 + OpenTelemetry + AWS X-Ray on EC2
+# Laravel 12 OpenTelemetry EC2 X-Ray監視システム
 
-このプロジェクトは、Laravel 12アプリケーションにOpenTelemetryを統合し、AWS X-RayとEC2環境での監視を実現するサンプルプロジェクトです。
+このプロジェクトは、Laravel 12アプリケーションをAWS EC2環境でOpenTelemetryとX-Rayを使用して監視するシステムです。
+
+## 🛠️ CloudWatch Agent設定修正
+
+### 問題: CloudWatch Agentとの競合
+CloudWatch Agentの設定に`traces`セクションがある場合、OpenTelemetry Collectorとポート競合が発生します。
+
+### 解決方法
+
+#### 自動修正スクリプト（推奨）
+```bash
+# スクリプトを実行可能にする（Linux/WSL/GitBash）
+chmod +x scripts/fix-cloudwatch-agent-config.sh
+
+# 設定修正を実行
+sudo ./scripts/fix-cloudwatch-agent-config.sh
+```
+
+#### 手動修正
+1. CloudWatch Agentの設定ファイルを編集：
+   ```bash
+   sudo nano /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+   ```
+
+2. 以下の`traces`セクションを削除：
+   ```json
+   "traces": {
+     "traces_collected": {
+       "otlp": {
+         "grpc_endpoint": "127.0.0.1:4317",
+         "http_endpoint": "127.0.0.1:4318"
+       }
+     }
+   },
+   ```
+
+3. CloudWatch Agentを再起動：
+   ```bash
+   sudo systemctl restart amazon-cloudwatch-agent
+   ```
+
+### 詳細な手順
+詳細な設定手順は以下のドキュメントを参照してください：
+- [CloudWatch Agent統合ガイド](docs/CLOUDWATCH_AGENT_INTEGRATION_GUIDE.md)
 
 ## 🚀 主な機能
 
