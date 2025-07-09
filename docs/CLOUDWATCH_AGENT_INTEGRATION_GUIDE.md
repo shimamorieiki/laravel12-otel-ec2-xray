@@ -381,12 +381,6 @@ sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /de
       "otlp": {
         "grpc_endpoint": "127.0.0.1:4317",
         "http_endpoint": "127.0.0.1:4318"
-      },
-      "xray": {
-        "bind_address": "127.0.0.1:2000",
-        "tcp_proxy": {
-          "bind_address": "127.0.0.1:2000"
-        }
       }
     }
   },
@@ -398,26 +392,17 @@ sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /de
           "cpu_usage_idle",
           "cpu_usage_iowait",
           "cpu_usage_user",
-          "cpu_usage_system",
-          "cpu_usage_steal",
-          "cpu_usage_nice",
-          "cpu_usage_softirq",
-          "cpu_usage_irq"
+          "cpu_usage_system"
         ],
         "metrics_collection_interval": 60,
-        "totalcpu": true,
-        "resources": ["*"]
+        "totalcpu": true
       },
       "disk": {
         "measurement": [
-          "used_percent",
-          "inodes_free",
-          "inodes_used",
-          "inodes_total"
+          "used_percent"
         ],
         "metrics_collection_interval": 60,
-        "resources": ["*"],
-        "ignore_file_system_types": ["sysfs", "devtmpfs", "tmpfs"]
+        "resources": ["*"]
       },
       "diskio": {
         "measurement": [
@@ -425,10 +410,7 @@ sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /de
           "read_bytes",
           "write_bytes",
           "reads",
-          "writes",
-          "read_time",
-          "write_time",
-          "iops_in_progress"
+          "writes"
         ],
         "metrics_collection_interval": 60,
         "resources": ["*"]
@@ -438,308 +420,28 @@ sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /de
           "mem_used_percent",
           "mem_available",
           "mem_used",
-          "mem_total",
-          "mem_cached",
-          "mem_buffers"
+          "mem_total"
         ],
         "metrics_collection_interval": 60
-      },
-      "net": {
-        "measurement": [
-          "bytes_sent",
-          "bytes_recv",
-          "packets_sent",
-          "packets_recv",
-          "err_in",
-          "err_out",
-          "drop_in",
-          "drop_out"
-        ],
-        "metrics_collection_interval": 60,
-        "resources": ["*"]
-      },
-      "netstat": {
-        "measurement": [
-          "tcp_established",
-          "tcp_time_wait",
-          "tcp_close",
-          "tcp_close_wait",
-          "tcp_closing",
-          "tcp_fin_wait1",
-          "tcp_fin_wait2",
-          "tcp_last_ack",
-          "tcp_listen",
-          "tcp_syn_sent",
-          "tcp_syn_recv",
-          "udp_socket"
-        ],
-        "metrics_collection_interval": 60
-      },
-      "processes": {
-        "measurement": [
-          "running",
-          "sleeping",
-          "dead",
-          "zombies",
-          "stopped",
-          "total"
-        ]
       },
       "swap": {
         "measurement": [
           "swap_used_percent",
           "swap_free",
-          "swap_used",
-          "swap_total"
-        ]
+          "swap_used"
+        ],
+        "metrics_collection_interval": 60
       },
-      "procstat": [
-        {
-          "pattern": "nginx",
-          "measurement": [
-            "cpu_usage",
-            "memory_rss",
-            "memory_vms",
-            "memory_swap",
-            "read_bytes",
-            "write_bytes",
-            "read_count",
-            "write_count",
-            "num_threads"
-          ],
-          "metrics_collection_interval": 60,
-          "totalcpu": true
-        },
-        {
-          "pattern": "php-fpm",
-          "measurement": [
-            "cpu_usage",
-            "memory_rss",
-            "memory_vms",
-            "memory_swap",
-            "read_bytes",
-            "write_bytes",
-            "read_count",
-            "write_count",
-            "num_threads"
-          ],
-          "metrics_collection_interval": 60,
-          "totalcpu": true
-        },
-        {
-          "pattern": "otelcol-contrib",
-          "measurement": [
-            "cpu_usage",
-            "memory_rss",
-            "memory_vms",
-            "num_threads"
-          ],
-          "metrics_collection_interval": 60,
-          "totalcpu": true
-        }
-      ],
-      "statsd": {
-        "service_address": ":8125",
-        "metrics_collection_interval": 60,
-        "metric_separator": "_",
-        "allowed_pending_messages": 10000
-      }
-    },
-    "append_dimensions": {
-      "AutoScalingGroupName": "${aws:AutoScalingGroupName}",
-      "ImageId": "${aws:ImageId}",
-      "InstanceId": "${aws:InstanceId}",
-      "InstanceType": "${aws:InstanceType}",
-      "Environment": "production",
-      "Application": "Laravel-OpenTelemetry"
-    }
-  },
-  "logs": {
-    "logs_collected": {
-      "files": {
-        "collect_list": [
-          {
-            "file_path": "/var/log/nginx/access.log",
-            "log_group_name": "/aws/ec2/nginx/access",
-            "log_stream_name": "{instance_id}-{hostname}",
-            "timezone": "UTC",
-            "timestamp_format": "%d/%b/%Y:%H:%M:%S %z"
-          },
-          {
-            "file_path": "/var/log/nginx/error.log",
-            "log_group_name": "/aws/ec2/nginx/error",
-            "log_stream_name": "{instance_id}-{hostname}",
-            "timezone": "UTC"
-          },
-          {
-            "file_path": "/var/log/php-fpm/error.log",
-            "log_group_name": "/aws/ec2/php-fpm/error",
-            "log_stream_name": "{instance_id}-{hostname}",
-            "timezone": "UTC"
-          },
-          {
-            "file_path": "/var/log/php-fpm/www-error.log",
-            "log_group_name": "/aws/ec2/php-fpm/www-error",
-            "log_stream_name": "{instance_id}-{hostname}",
-            "timezone": "UTC"
-          },
-          {
-            "file_path": "/var/www/html/laravel12-otel-ec2-xray/storage/logs/laravel.log",
-            "log_group_name": "/aws/ec2/laravel/application",
-            "log_stream_name": "{instance_id}-{hostname}",
-            "timezone": "UTC",
-            "timestamp_format": "[%Y-%m-%d %H:%M:%S]"
-          },
-          {
-            "file_path": "/var/log/messages",
-            "log_group_name": "/aws/ec2/system/messages",
-            "log_stream_name": "{instance_id}-{hostname}",
-            "timezone": "UTC"
-          },
-          {
-            "file_path": "/var/log/otel-collector/collector.log",
-            "log_group_name": "/aws/ec2/otel-collector",
-            "log_stream_name": "{instance_id}-{hostname}",
-            "timezone": "UTC"
-          }
-        ]
+      "netstat": {
+        "measurement": [
+          "tcp_established",
+          "tcp_time_wait"
+        ],
+        "metrics_collection_interval": 60
       }
     }
   }
 }
-EOF
-```
-
-### 4. OpenTelemetry Collector設定ファイル
-```bash
-# OpenTelemetry Collector設定（CloudWatch Agentと統合）
-sudo tee /etc/otel-collector/config.yaml > /dev/null <<'EOF'
-receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317
-      http:
-        endpoint: 0.0.0.0:4318
-
-processors:
-  batch:
-    timeout: 5s
-    send_batch_size: 512
-    send_batch_max_size: 1024
-
-  resource:
-    attributes:
-      - key: service.name
-        value: laravel-app
-        action: upsert
-      - key: service.version
-        value: "1.0.0"
-        action: upsert
-      - key: deployment.environment
-        value: production
-        action: upsert
-      - key: cloud.provider
-        value: aws
-        action: upsert
-      - key: cloud.platform
-        value: aws_ec2
-        action: upsert
-      - key: cloud.region
-        value: ap-northeast-1
-        action: upsert
-
-  memory_limiter:
-    limit_mib: 256
-    check_interval: 1s
-
-  # カスタムメトリクスのフィルタリング
-  filter:
-    metrics:
-      include:
-        match_type: regexp
-        metric_names:
-          - "http_.*"
-          - "db_.*"
-          - "cache_.*"
-          - "queue_.*"
-          - "laravel_.*"
-
-exporters:
-  # デバッグ用（本番環境では無効化）
-  logging:
-    verbosity: normal
-
-  # AWS X-Ray（トレース専用）
-  awsxray:
-    endpoint: http://127.0.0.1:2000
-    local_mode: true
-    region: ap-northeast-1
-    no_verify_ssl: false
-    index_all_attributes: true
-
-  # CloudWatch メトリクス（アプリケーション用）
-  awsemf:
-    region: ap-northeast-1
-    namespace: Laravel/Application
-    dimension_rollup_option: NoDimensionRollup
-    metric_declarations:
-      - dimensions: [[service.name], [service.name, deployment.environment]]
-        metric_name_selectors:
-          - "http_.*"
-          - "db_.*"
-          - "cache_.*"
-          - "queue_.*"
-      - dimensions: [[service.name, http.method], [service.name, http.method, http.status_code]]
-        metric_name_selectors:
-          - "http_request_duration"
-          - "http_request_size"
-          - "http_response_size"
-
-  # CloudWatch Logs（構造化ログ用）
-  awscloudwatchlogs:
-    region: ap-northeast-1
-    log_group_name: "/aws/otel/laravel"
-    log_stream_name: "application-{instance_id}"
-
-  # StatsD (CloudWatch Agentに送信)
-  statsd:
-    endpoint: "127.0.0.1:8125"
-    dial_timeout: 2s
-    metrics_aggregation_interval: 60s
-
-extensions:
-  health_check:
-    endpoint: 0.0.0.0:13133
-    path: /
-
-  pprof:
-    endpoint: 0.0.0.0:1777
-
-  zpages:
-    endpoint: 0.0.0.0:55679
-
-service:
-  extensions: [health_check, pprof, zpages]
-  telemetry:
-    logs:
-      level: info
-    metrics:
-      level: basic
-      address: 0.0.0.0:8888
-  pipelines:
-    traces:
-      receivers: [otlp]
-      processors: [memory_limiter, batch, resource]
-      exporters: [awsxray, logging]
-    metrics:
-      receivers: [otlp]
-      processors: [memory_limiter, batch, resource, filter]
-      exporters: [awsemf, statsd, logging]
-    logs:
-      receivers: [otlp]
-      processors: [memory_limiter, batch, resource]
-      exporters: [awscloudwatchlogs, logging]
 EOF
 ```
 
