@@ -421,3 +421,92 @@ sudo php artisan view:cache
 # データベースマイグレーション
 sudo php artisan migrate
 ```
+
+## nginxの設定
+
+```bash
+# Laravelアプリケーション用のNginx設定
+sudo tee /etc/nginx/conf.d/laravel.conf > /dev/null <<'EOF'
+server {
+    listen 80;
+    server_name _;
+    root /var/www/html/laravel12-otel-ec2-xray/public;
+
+    index index.php;
+
+    # ログファイルの設定
+    access_log /var/log/nginx/laravel_access.log;
+    error_log /var/log/nginx/laravel_error.log;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        fastcgi_pass unix:/var/run/php-fpm/www.sock;
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        include fastcgi_params;
+        fastcgi_param HTTP_PROXY "";
+        
+        # タイムアウト設定
+        fastcgi_connect_timeout 60s;
+        fastcgi_send_timeout 60s;
+        fastcgi_read_timeout 60s;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+
+    # セキュリティヘッダー
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+
+    # サーバー情報の非表示
+    server_tokens off;
+}
+EOF
+```
+
+## nginxサービス起動
+```bash
+# systemdの設定を再読み込み
+sudo systemctl daemon-reload
+
+# サービスの有効化と起動
+sudo systemctl enable --now nginx
+
+sudo systemctl start nginx
+
+sudo systemctl status nginx
+```
+
+
+## php-fpmサービス起動
+```bash
+# PHP-FPMをnginxユーザーで実行するよう設定
+sudo sed -i 's/^user = apache/user = nginx/' /etc/php-fpm.d/www.conf
+sudo sed -i 's/^group = apache/group = nginx/' /etc/php-fpm.d/www.conf
+sudo sed -i 's/^listen.owner = apache/listen.owner = nginx/' /etc/php-fpm.d/www.conf
+sudo sed -i 's/^listen.group = apache/listen.group = nginx/' /etc/php-fpm.d/www.conf
+
+# systemdの設定を再読み込み
+sudo systemctl daemon-reload
+
+# サービスの有効化と起動
+sudo systemctl restart php-fpm
+```
+
+cloud watch agentのログを見る
+```bash
+sudo tail -30 /opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log
+```
+
+作成したファイルを読む権限
+```bash
+sudo chmod 644 /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+sudo chown root:root /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+```
