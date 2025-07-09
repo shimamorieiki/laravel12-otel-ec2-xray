@@ -153,18 +153,18 @@ rm -rf /tmp/xray aws-xray-daemon-linux-3.x.zip
 
 ```bash
 # アプリケーションディレクトリの作成
-sudo mkdir -p /var/www
-cd /var/www
+sudo mkdir -p /var/www/html
+cd /var/www/html
 
 # Gitリポジトリのクローン
 sudo git clone https://github.com/yourusername/laravel12-otel-ec2-xray.git
 cd laravel12-otel-ec2-xray
 
 # 所有権の設定
-sudo chown -R nginx:nginx /var/www/laravel12-otel-ec2-xray
-sudo chmod -R 755 /var/www/laravel12-otel-ec2-xray
-sudo chmod -R 775 /var/www/laravel12-otel-ec2-xray/storage
-sudo chmod -R 775 /var/www/laravel12-otel-ec2-xray/bootstrap/cache
+sudo chown -R nginx:nginx /var/www/html/laravel12-otel-ec2-xray
+sudo chmod -R 755 /var/www/html/laravel12-otel-ec2-xray
+sudo chmod -R 775 /var/www/html/laravel12-otel-ec2-xray/storage
+sudo chmod -R 775 /var/www/html/laravel12-otel-ec2-xray/bootstrap/cache
 
 # Composer依存関係のインストール
 sudo -u nginx composer install --no-dev --optimize-autoloader
@@ -175,8 +175,9 @@ sudo -u nginx composer install --no-dev --optimize-autoloader
 ### 1. OpenTelemetry Collectorの設定
 
 ```bash
+sudo mkdir /etc/otel-collector/ 
 # EC2用の設定ファイルをコピー
-sudo cp /var/www/laravel12-otel-ec2-xray/docker/otel-collector/otel-collector-config.ec2.yaml /etc/otel-collector/config.yaml
+sudo cp /var/www/html/laravel12-otel-ec2-xray/docker/otel-collector/otel-collector-config.ec2.yaml /etc/otel-collector/config.yaml
 
 # 設定ファイルの確認
 sudo cat /etc/otel-collector/config.yaml
@@ -239,7 +240,7 @@ sudo tee /etc/nginx/conf.d/laravel.conf > /dev/null <<'EOF'
 server {
     listen 80;
     server_name _;
-    root /var/www/laravel12-otel-ec2-xray/public;
+    root /var/www/html/laravel12-otel-ec2-xray/public;
 
     index index.php;
 
@@ -294,7 +295,7 @@ sudo sed -i 's/^listen.group = apache/listen.group = nginx/' /etc/php-fpm.d/www.
 
 ```bash
 # .envファイルの作成
-cd /var/www/laravel12-otel-ec2-xray
+cd /var/www/html/laravel12-otel-ec2-xray
 sudo -u nginx cp .env.example .env
 
 # .envファイルの編集
@@ -412,7 +413,7 @@ ps aux | grep -E 'nginx|php-fpm|otelcol|xray'
 ### 4. アプリケーションの初期化
 
 ```bash
-cd /var/www/laravel12-otel-ec2-xray
+cd /var/www/html/laravel12-otel-ec2-xray
 
 # アプリケーションキーの生成
 sudo -u nginx php artisan key:generate
@@ -555,10 +556,10 @@ Permission denied
 #### 解決方法
 ```bash
 # ファイル所有権の修正
-sudo chown -R nginx:nginx /var/www/laravel12-otel-ec2-xray
-sudo chmod -R 755 /var/www/laravel12-otel-ec2-xray
-sudo chmod -R 775 /var/www/laravel12-otel-ec2-xray/storage
-sudo chmod -R 775 /var/www/laravel12-otel-ec2-xray/bootstrap/cache
+sudo chown -R nginx:nginx /var/www/html/laravel12-otel-ec2-xray
+sudo chmod -R 755 /var/www/html/laravel12-otel-ec2-xray
+sudo chmod -R 775 /var/www/html/laravel12-otel-ec2-xray/storage
+sudo chmod -R 775 /var/www/html/laravel12-otel-ec2-xray/bootstrap/cache
 
 # SELinuxの確認（必要に応じて）
 sudo setsebool -P httpd_can_network_connect 1
@@ -570,7 +571,7 @@ sudo setsebool -P httpd_can_network_connect 1
 
 ```bash
 # アプリケーションログ
-sudo tail -f /var/www/laravel12-otel-ec2-xray/storage/logs/laravel.log
+sudo tail -f /var/www/html/laravel12-otel-ec2-xray/storage/logs/laravel.log
 
 # Nginxログ
 sudo tail -f /var/log/nginx/laravel_access.log
@@ -623,7 +624,7 @@ sudo yum update -y
 
 ```bash
 # アプリケーションのバックアップ
-sudo tar -czf /tmp/laravel-backup-$(date +%Y%m%d).tar.gz /var/www/laravel12-otel-ec2-xray
+sudo tar -czf /tmp/laravel-backup-$(date +%Y%m%d).tar.gz /var/www/html/laravel12-otel-ec2-xray
 
 # データベースのバックアップ（RDSスナップショット推奨）
 pg_dump -h your-rds-endpoint -U your-username -d laravel > /tmp/db-backup-$(date +%Y%m%d).sql
