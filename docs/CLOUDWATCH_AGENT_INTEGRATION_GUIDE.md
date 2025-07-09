@@ -320,132 +320,251 @@ sudo systemctl start amazon-cloudwatch-agent
 sudo systemctl status amazon-cloudwatch-agent
 ```
 
-## 🔄 OpenTelemetry Collector統合設定
+### 5. AWS X-Ray Daemon のインストールと設定
 
-### 1. OpenTelemetry Collectorの役割
-OpenTelemetry Collectorは以下を担当します：
-- **アプリケーション トレース**: リクエストフロー、データベースクエリ
-- **カスタム メトリクス**: ビジネスロジック固有のメトリクス
-- **構造化ログ**: アプリケーションログの構造化処理
+#### 5.1 X-Ray Daemon のインストール
 
-### 2. OpenTelemetry Collectorのインストール
-
-#### Amazon Linux 2023の場合
 ```bash
-# OpenTelemetry Collectorのダウンロード
-OTEL_VERSION="0.129.0"
-wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTEL_VERSION}/otelcol-contrib_${OTEL_VERSION}_linux_amd64.tar.gz
+# X-Ray Daemonのダウンロード
+wget https://s3.amazonaws.com/aws-xray-assets.us-east-1/xray-daemon/aws-xray-daemon-linux-3.x.zip
 
-# 展開とインストール
-tar -xzf otelcol-contrib_${OTEL_VERSION}_linux_amd64.tar.gz
-sudo mv otelcol-contrib /usr/local/bin/
-sudo chmod +x /usr/local/bin/otelcol-contrib
+# 解凍とインストール
+unzip aws-xray-daemon-linux-3.x.zip -d /tmp/xray
+sudo mkdir -p /opt/xray
+sudo mv /tmp/xray/xray /opt/xray/
+sudo chmod +x /opt/xray/xray
 
-# 設定ディレクトリの作成
-sudo mkdir -p /etc/otel-collector
+# 一時ファイルの削除
+rm -rf /tmp/xray aws-xray-daemon-linux-3.x.zip
 ```
 
-#### systemdサービスファイルの作成
+#### 5.2 X-Ray Daemon の設定
+
+##### 設定ファイルの作成
 ```bash
-sudo tee /etc/systemd/system/otel-collector.service > /dev/null <<'EOF'
+# 設定ディレクトリの作成
+sudo mkdir -p /etc/amazon/xray
+
+# X-Ray Daemon設定ファイルの作成
+sudo tee /etc/amazon/xray/cfg.yaml > /dev/null <<'EOF'
+# X-Ray Daemon設定ファイル
+# 詳細: https://docs.aws.amazon.com/xray/latest/devguide/xray-daemon-configuration.html
+
+# サービス設定
+TotalBufferSizeInMB: 0
+Concurrency: 8
+Region: ""
+NoVerifySSL: false
+ProxyAddress: ""
+Endpoint: ""
+LocalMode: false
+ResourceARN: ""
+RoleARN: ""
+
+# ログ設定
+LogLevel: info
+LogFormat: ""
+
+# TCP接続設定
+TCPAddress: "0.0.0.0:2000"
+UDPAddress: "0.0.0.0:2000"
+
+# その他の設定
+Socket:
+  UDPAddress: "0.0.0.0:2000"
+  TCPAddress: "0.0.0.0:2000"
+EOF
+```
+
+#### 5.3 systemd サービスの設定
+
+##### サービスファイルの作成
+```bash
+# X-Ray Daemon systemdサービスファイルの作成
+sudo tee /etc/systemd/system/xray.service > /dev/null <<'EOF'
 [Unit]
-Description=OpenTelemetry Collector
+Description=AWS X-Ray Daemon
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/otelcol-contrib --config=/etc/otel-collector/config.yaml
-Restart=always
+User=xray
+Group=xray
+ExecStart=/usr/bin/xray -c /etc/amazon/xray/cfg.yaml
+Restart=on-failure
 RestartSec=5
-User=root
-Group=root
+StandardOutput=journal
+StandardError=journal
+
+# セキュリティ設定
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/tmp
 
 [Install]
 WantedBy=multi-user.target
 EOF
 ```
 
-### 3. CloudWatch Agent統合設定
-
-#### CloudWatch Agent設定でOpenTelemetry Collectorを統合
+##### サービスの有効化
 ```bash
-# CloudWatch Agent設定（OpenTelemetry Collector統合版）
-sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null <<'EOF'
-{
-  "agent": {
-    "metrics_collection_interval": 60,
-    "run_as_user": "root"
-  },
-  "traces": {
-    "traces_collected": {
-      "otlp": {
-        "grpc_endpoint": "127.0.0.1:4317",
-        "http_endpoint": "127.0.0.1:4318"
-      }
-    }
-  },
-  "metrics": {
-    "namespace": "Laravel/Infrastructure",
-    "metrics_collected": {
-      "cpu": {
-        "measurement": [
-          "cpu_usage_idle",
-          "cpu_usage_iowait",
-          "cpu_usage_user",
-          "cpu_usage_system"
-        ],
-        "metrics_collection_interval": 60,
-        "totalcpu": true
-      },
-      "disk": {
-        "measurement": [
-          "used_percent"
-        ],
-        "metrics_collection_interval": 60,
-        "resources": ["*"]
-      },
-      "diskio": {
-        "measurement": [
-          "io_time",
-          "read_bytes",
-          "write_bytes",
-          "reads",
-          "writes"
-        ],
-        "metrics_collection_interval": 60,
-        "resources": ["*"]
-      },
-      "mem": {
-        "measurement": [
-          "mem_used_percent",
-          "mem_available",
-          "mem_used",
-          "mem_total"
-        ],
-        "metrics_collection_interval": 60
-      },
-      "swap": {
-        "measurement": [
-          "swap_used_percent",
-          "swap_free",
-          "swap_used"
-        ],
-        "metrics_collection_interval": 60
-      },
-      "netstat": {
-        "measurement": [
-          "tcp_established",
-          "tcp_time_wait"
-        ],
-        "metrics_collection_interval": 60
-      }
-    }
-  }
-}
-EOF
+# systemdの再読み込み
+sudo systemctl daemon-reload
+
+# サービスの有効化
+sudo systemctl enable xray
+
+# サービスの起動
+sudo systemctl start xray
+
+# 状態確認
+sudo systemctl status xray
 ```
 
-### 5. サービスの起動と管理
+#### 5.4 IAMポリシーの設定
+
+##### 必要なIAMポリシー
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "xray:PutTraceSegments",
+        "xray:PutTelemetryRecords"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+##### IAMロールの適用
+```bash
+# EC2インスタンスにIAMロールを適用
+# AWS Console または AWS CLI を使用
+
+# 現在のロールの確認
+aws sts get-caller-identity
+
+# X-Ray権限の確認
+aws xray get-service-graph --start-time 2023-01-01T00:00:00Z --end-time 2023-12-31T23:59:59Z
+```
+
+#### 5.5 テストと検証
+
+##### 基本的な動作確認
+```bash
+# X-Ray Daemonの起動確認
+sudo systemctl status xray
+
+# ポート使用状況の確認
+sudo netstat -tlnp | grep 2000
+
+# ログの確認
+sudo journalctl -u xray -f
+
+# プロセス確認
+ps aux | grep xray
+```
+
+##### 接続テスト
+```bash
+# X-Ray Daemonへの接続テスト
+telnet localhost 2000
+
+# UDP接続テスト
+echo "test" | nc -u localhost 2000
+```
+
+##### トレースデータの送信テスト
+```bash
+# 簡単なトレースデータの送信（テスト用）
+curl -X POST http://localhost:2000/TraceSegments \
+  -H "Content-Type: application/json" \
+  -d '{
+    "trace_id": "1-'$(date +%s)'-'$(openssl rand -hex 12)'",
+    "id": "'$(openssl rand -hex 8)'",
+    "name": "test-segment",
+    "start_time": '$(date +%s)',
+    "end_time": '$(date +%s)',
+    "service": {"name": "test-service"}
+  }'
+```
+
+#### 5.6 トラブルシューティング
+
+##### 一般的な問題と解決策
+
+**問題1: X-Ray Daemonが起動しない**
+```bash
+# ログの確認
+sudo journalctl -u xray -n 50
+
+# 設定ファイルの確認
+sudo xray -c /etc/amazon/xray/cfg.yaml -t
+
+# 権限の確認
+sudo ls -la /etc/amazon/xray/
+```
+
+**問題2: ポート2000が使用されている**
+```bash
+# ポート使用状況の確認
+sudo lsof -i :2000
+
+# 設定ファイルでポート変更
+sudo nano /etc/amazon/xray/cfg.yaml
+# TCPAddress: "0.0.0.0:2001"
+# UDPAddress: "0.0.0.0:2001"
+```
+
+**問題3: AWS権限エラー**
+```bash
+# IAMロールの確認
+aws sts get-caller-identity
+
+# X-Ray権限のテスト
+aws xray put-telemetry-records --telemetry-records '[]'
+```
+
+**問題4: OpenTelemetry Collectorとの連携エラー**
+```bash
+# OpenTelemetry Collectorの設定確認
+sudo cat /etc/otel-collector/config.yaml | grep -A 10 "xray"
+
+# 連携テスト
+curl -X POST http://localhost:4318/v1/traces \
+  -H "Content-Type: application/json" \
+  -d '{"resourceSpans": []}'
+```
+
+##### 詳細なモニタリング設定
+```bash
+# X-Ray Daemon詳細ログの有効化
+sudo tee /etc/amazon/xray/cfg.yaml > /dev/null <<'EOF'
+LogLevel: debug
+LogFormat: "[%level] %time %msg"
+TotalBufferSizeInMB: 16
+Concurrency: 16
+Region: ""
+NoVerifySSL: false
+LocalMode: false
+ResourceARN: ""
+RoleARN: ""
+Socket:
+  UDPAddress: "0.0.0.0:2000"
+  TCPAddress: "0.0.0.0:2000"
+EOF
+
+# サービス再起動
+sudo systemctl restart xray
+```
+
+### 6. サービスの起動と管理
 
 #### 両方のサービスの起動
 ```bash
@@ -489,7 +608,7 @@ sudo tail -f /opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log
 sudo journalctl -u otel-collector -f
 ```
 
-### 6. 統合テストスクリプト
+### 7. 統合テストスクリプト
 
 #### 統合動作テスト
 ```bash
@@ -570,7 +689,7 @@ aws cloudwatch get-metric-statistics \
 echo -e "\n✅ 統合テスト完了"
 ```
 
-### 7. 自動デプロイスクリプト
+### 8. 自動デプロイスクリプト
 
 #### 一括セットアップスクリプト
 ```bash
