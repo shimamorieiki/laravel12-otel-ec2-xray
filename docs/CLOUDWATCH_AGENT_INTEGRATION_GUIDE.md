@@ -59,15 +59,6 @@ sudo yum install amazon-cloudwatch-agent -y
 sudo dnf install amazon-cloudwatch-agent -y
 ```
 
-#### その他のLinuxディストリビューション
-```bash
-# CloudWatch Agentのダウンロード
-wget https://s3.amazonaws.com/amazoncloudwatch-agent/amazon_linux/amd64/latest/amazon-cloudwatch-agent.rpm
-
-# インストール
-sudo rpm -U amazon-cloudwatch-agent.rpm
-```
-
 #### 共通設定
 ```bash
 # 設定ディレクトリの作成
@@ -340,68 +331,21 @@ rm -rf /tmp/xray aws-xray-daemon-linux-3.x.zip
 
 #### 5.2 X-Ray Daemon の設定
 
-##### 設定ファイルの作成
-```bash
-# 設定ディレクトリの作成
-sudo mkdir -p /etc/amazon/xray
-
-# X-Ray Daemon設定ファイルの作成
-sudo tee /etc/amazon/xray/cfg.yaml > /dev/null <<'EOF'
-# X-Ray Daemon設定ファイル
-# 詳細: https://docs.aws.amazon.com/xray/latest/devguide/xray-daemon-configuration.html
-
-# サービス設定
-TotalBufferSizeInMB: 0
-Concurrency: 8
-Region: ""
-NoVerifySSL: false
-ProxyAddress: ""
-Endpoint: ""
-LocalMode: false
-ResourceARN: ""
-RoleARN: ""
-
-# ログ設定
-LogLevel: info
-LogFormat: ""
-
-# TCP接続設定
-TCPAddress: "0.0.0.0:2000"
-UDPAddress: "0.0.0.0:2000"
-
-# その他の設定
-Socket:
-  UDPAddress: "0.0.0.0:2000"
-  TCPAddress: "0.0.0.0:2000"
-EOF
-```
-
 #### 5.3 systemd サービスの設定
 
 ##### サービスファイルの作成
 ```bash
 # X-Ray Daemon systemdサービスファイルの作成
-sudo tee /etc/systemd/system/xray.service > /dev/null <<'EOF'
+sudo tee /etc/systemd/system/xray.service > /dev/null <<EOF
 [Unit]
 Description=AWS X-Ray Daemon
 After=network.target
 
 [Service]
 Type=simple
-User=xray
-Group=xray
-ExecStart=/usr/bin/xray -c /etc/amazon/xray/cfg.yaml
-Restart=on-failure
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-
-# セキュリティ設定
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/tmp
+ExecStart=/opt/xray/xray -o -n ap-northeast-1
+Restart=always
+User=root
 
 [Install]
 WantedBy=multi-user.target
@@ -421,695 +365,59 @@ sudo systemctl start xray
 
 # 状態確認
 sudo systemctl status xray
+
+# エラーログの確認
+sudo journalctl -u xray -n 20 --no-pager
 ```
 
-#### 5.4 IAMポリシーの設定
+## 必要なパッケージのインストール
 
-##### 必要なIAMポリシー
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "xray:PutTraceSegments",
-        "xray:PutTelemetryRecords"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-##### IAMロールの適用
+**SSH接続したEC2内で実行**：
 ```bash
-# EC2インスタンスにIAMロールを適用
-# AWS Console または AWS CLI を使用
+# システムを更新
+sudo yum update -y
 
-# 現在のロールの確認
-aws sts get-caller-identity
+# 必要なパッケージをインストール
+sudo yum install -y git nginx php php-fpm php-mbstring php-xml php-pdo php-pgsql php-zip php-curl php-gd php-intl php-bcmath composer
 
-# X-Ray権限の確認
-aws xray get-service-graph --start-time 2023-01-01T00:00:00Z --end-time 2023-12-31T23:59:59Z
+# PostgreSQLクライアントをインストール
+sudo yum install -y postgresql15
+
+# サービスを有効化・開始
+sudo systemctl enable nginx php-fpm
+sudo systemctl start nginx php-fpm
 ```
 
-#### 5.5 テストと検証
+## アプリケーションのインストール
 
-##### 基本的な動作確認
 ```bash
-# X-Ray Daemonの起動確認
-sudo systemctl status xray
+# ディレクトリ作成
+sudo mkdir -p /var/www/html
+cd /var/www/html
 
-# ポート使用状況の確認
-sudo netstat -tlnp | grep 2000
+# リポジトリクローン
+sudo git clone https://github.com/shimamorieiki/laravel12-otel-ec2-xray.git
 
-# ログの確認
-sudo journalctl -u xray -f
+# 権限回りの修正
+git config --global --add safe.directory /var/www/laravel12-otel-ec2-xray
 
-# プロセス確認
-ps aux | grep xray
+# 所有権設定
+sudo chown -R nginx:nginx /var/www/html/laravel12-otel-ec2-xray
+sudo chmod -R 755 /var/www/html/laravel12-otel-ec2-xray
+sudo chmod -R 775 /var/www/html/laravel12-otel-ec2-xray/storage
+sudo chmod -R 775 /var/www/html/laravel12-otel-ec2-xray/bootstrap/cache
+
+# 依存関係をインストール
+composer install --no-dev --optimize-autoloader
+
+# APP_KEYを生成
+sudo php artisan key:generate
+
+# キャッシュをクリア
+sudo php artisan config:cache
+sudo php artisan route:cache
+sudo php artisan view:cache
+
+# データベースマイグレーション
+sudo php artisan migrate
 ```
-
-##### 接続テスト
-```bash
-# X-Ray Daemonへの接続テスト
-telnet localhost 2000
-
-# UDP接続テスト
-echo "test" | nc -u localhost 2000
-```
-
-##### トレースデータの送信テスト
-```bash
-# 簡単なトレースデータの送信（テスト用）
-curl -X POST http://localhost:2000/TraceSegments \
-  -H "Content-Type: application/json" \
-  -d '{
-    "trace_id": "1-'$(date +%s)'-'$(openssl rand -hex 12)'",
-    "id": "'$(openssl rand -hex 8)'",
-    "name": "test-segment",
-    "start_time": '$(date +%s)',
-    "end_time": '$(date +%s)',
-    "service": {"name": "test-service"}
-  }'
-```
-
-#### 5.6 トラブルシューティング
-
-##### 一般的な問題と解決策
-
-**問題1: X-Ray Daemonが起動しない**
-```bash
-# ログの確認
-sudo journalctl -u xray -n 50
-
-# 設定ファイルの確認
-sudo xray -c /etc/amazon/xray/cfg.yaml -t
-
-# 権限の確認
-sudo ls -la /etc/amazon/xray/
-```
-
-**問題2: ポート2000が使用されている**
-```bash
-# ポート使用状況の確認
-sudo lsof -i :2000
-
-# 設定ファイルでポート変更
-sudo nano /etc/amazon/xray/cfg.yaml
-# TCPAddress: "0.0.0.0:2001"
-# UDPAddress: "0.0.0.0:2001"
-```
-
-**問題3: AWS権限エラー**
-```bash
-# IAMロールの確認
-aws sts get-caller-identity
-
-# X-Ray権限のテスト
-aws xray put-telemetry-records --telemetry-records '[]'
-```
-
-**問題4: OpenTelemetry Collectorとの連携エラー**
-```bash
-# OpenTelemetry Collectorの設定確認
-sudo cat /etc/otel-collector/config.yaml | grep -A 10 "xray"
-
-# 連携テスト
-curl -X POST http://localhost:4318/v1/traces \
-  -H "Content-Type: application/json" \
-  -d '{"resourceSpans": []}'
-```
-
-##### 詳細なモニタリング設定
-```bash
-# X-Ray Daemon詳細ログの有効化
-sudo tee /etc/amazon/xray/cfg.yaml > /dev/null <<'EOF'
-LogLevel: debug
-LogFormat: "[%level] %time %msg"
-TotalBufferSizeInMB: 16
-Concurrency: 16
-Region: ""
-NoVerifySSL: false
-LocalMode: false
-ResourceARN: ""
-RoleARN: ""
-Socket:
-  UDPAddress: "0.0.0.0:2000"
-  TCPAddress: "0.0.0.0:2000"
-EOF
-
-# サービス再起動
-sudo systemctl restart xray
-```
-
-### 6. サービスの起動と管理
-
-#### 両方のサービスの起動
-```bash
-# CloudWatch Agentの設定適用と起動
-sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
-    -a fetch-config \
-    -m ec2 \
-    -s \
-    -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
-
-# OpenTelemetry Collectorの起動
-sudo systemctl daemon-reload
-sudo systemctl enable otel-collector
-sudo systemctl start otel-collector
-
-# X-Ray Daemonの起動
-sudo systemctl enable xray
-sudo systemctl start xray
-
-# 全サービスの状態確認
-sudo systemctl status amazon-cloudwatch-agent otel-collector xray
-```
-
-#### サービス間の連携確認
-```bash
-# ポート使用状況の確認
-echo "=== ポート使用状況 ==="
-sudo netstat -tlnp | grep -E "4317|4318|8125|2000|13133"
-
-# 期待される結果:
-# 4317: otelcol-contrib (OpenTelemetry Collector gRPC)
-# 4318: otelcol-contrib (OpenTelemetry Collector HTTP)
-# 8125: amazon-cloudwatch-agent (StatsD)
-# 2000: xray (X-Ray Daemon)
-# 13133: otelcol-contrib (Health Check)
-
-# CloudWatch Agentのログ確認
-sudo tail -f /opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log
-
-# OpenTelemetry Collectorのログ確認
-sudo journalctl -u otel-collector -f
-```
-
-### 7. 統合テストスクリプト
-
-#### 統合動作テスト
-```bash
-#!/bin/bash
-# integrated-test.sh - CloudWatch Agent + OpenTelemetry Collector統合テスト
-
-echo "🔍 統合動作テスト"
-echo "=================="
-
-# 1. サービス状態確認
-echo "1. サービス状態確認"
-services=("amazon-cloudwatch-agent" "otel-collector" "xray")
-for service in "${services[@]}"; do
-    if systemctl is-active --quiet "$service"; then
-        echo "✅ $service: Active"
-    else
-        echo "❌ $service: Inactive"
-    fi
-done
-
-# 2. ポート競合チェック
-echo -e "\n2. ポート競合チェック"
-echo "CloudWatch Agent StatsD (8125):"
-if sudo lsof -i :8125 | grep -q amazon-cloudwatch-agent; then
-    echo "✅ CloudWatch Agent listening on 8125"
-else
-    echo "❌ CloudWatch Agent not listening on 8125"
-fi
-
-echo "OpenTelemetry Collector (4317/4318):"
-if sudo lsof -i :4317 | grep -q otelcol-contrib; then
-    echo "✅ OpenTelemetry Collector listening on 4317"
-else
-    echo "❌ OpenTelemetry Collector not listening on 4317"
-fi
-
-# 3. OpenTelemetry Collector health check
-echo -e "\n3. OpenTelemetry Collector Health Check"
-if curl -s http://localhost:13133/ | grep -q "Server available"; then
-    echo "✅ OpenTelemetry Collector is healthy"
-else
-    echo "❌ OpenTelemetry Collector health check failed"
-fi
-
-# 4. StatsD連携テスト
-echo -e "\n4. StatsD連携テスト"
-echo "test.metric:1|c" | nc -u -w1 127.0.0.1 8125
-if [ $? -eq 0 ]; then
-    echo "✅ StatsD送信成功"
-else
-    echo "❌ StatsD送信失敗"
-fi
-
-# 5. メトリクス送信確認
-echo -e "\n5. メトリクス送信確認"
-echo "CloudWatch Agent メトリクス:"
-aws cloudwatch get-metric-statistics \
-    --namespace "Laravel/Infrastructure" \
-    --metric-name "cpu_usage_active" \
-    --start-time "$(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%S)" \
-    --end-time "$(date -u +%Y-%m-%dT%H:%M:%S)" \
-    --period 300 \
-    --statistics "Average" \
-    --query 'Datapoints[0].Average' \
-    --output text 2>/dev/null | head -1
-
-echo "OpenTelemetry Application メトリクス:"
-aws cloudwatch get-metric-statistics \
-    --namespace "Laravel/Application" \
-    --metric-name "http_request_duration" \
-    --start-time "$(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%S)" \
-    --end-time "$(date -u +%Y-%m-%dT%H:%M:%S)" \
-    --period 300 \
-    --statistics "Average" \
-    --query 'Datapoints[0].Average' \
-    --output text 2>/dev/null | head -1
-
-echo -e "\n✅ 統合テスト完了"
-```
-
-### 8. 自動デプロイスクリプト
-
-#### 一括セットアップスクリプト
-```bash
-#!/bin/bash
-# setup-integrated-monitoring.sh - 統合監視システムのセットアップ
-
-echo "🚀 統合監視システムセットアップ"
-echo "================================"
-
-# 1. CloudWatch Agentのインストール
-echo "1. CloudWatch Agentのインストール"
-if command -v yum &> /dev/null; then
-    sudo yum install amazon-cloudwatch-agent -y
-elif command -v dnf &> /dev/null; then
-    sudo dnf install amazon-cloudwatch-agent -y
-else
-    echo "❌ yum/dnf not found"
-    exit 1
-fi
-
-# 2. OpenTelemetry Collectorのインストール
-echo "2. OpenTelemetry Collectorのインストール"
-OTEL_VERSION="0.129.0"
-wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTEL_VERSION}/otelcol-contrib_${OTEL_VERSION}_linux_amd64.tar.gz
-tar -xzf otelcol-contrib_${OTEL_VERSION}_linux_amd64.tar.gz
-sudo mv otelcol-contrib /usr/local/bin/
-sudo chmod +x /usr/local/bin/otelcol-contrib
-sudo mkdir -p /etc/otel-collector
-
-# 3. X-Ray Daemonのインストール
-echo "3. X-Ray Daemonのインストール"
-if ! command -v xray &> /dev/null; then
-    wget https://s3.us-east-2.amazonaws.com/aws-xray-assets.us-east-2/xray-daemon/aws-xray-daemon-3.x.rpm
-    sudo yum install -y aws-xray-daemon-3.x.rpm
-fi
-
-# 4. 設定ファイルの作成
-echo "4. 設定ファイルの作成"
-# CloudWatch Agent設定は上記のJSONを使用
-# OpenTelemetry Collector設定は上記のYAMLを使用
-
-# 5. systemdサービスの設定
-echo "5. systemdサービスの設定"
-# OpenTelemetry Collectorのサービスファイルを作成（上記参照）
-
-# 6. サービスの起動
-echo "6. サービスの起動"
-sudo systemctl daemon-reload
-sudo systemctl enable amazon-cloudwatch-agent otel-collector xray
-sudo systemctl start amazon-cloudwatch-agent otel-collector xray
-
-# 7. 動作確認
-echo "7. 動作確認"
-sleep 10
-sudo systemctl status amazon-cloudwatch-agent otel-collector xray
-
-echo "✅ 統合監視システムセットアップ完了"
-EOF
-```
-
-## 📊 メトリクス統合とダッシュボード
-
-### 1. CloudWatch ダッシュボード設定
-```bash
-# CloudWatch ダッシュボードの作成
-aws cloudwatch put-dashboard --dashboard-name "Laravel-OpenTelemetry-Dashboard" --dashboard-body '{
-  "widgets": [
-    {
-      "type": "metric",
-      "properties": {
-        "metrics": [
-          ["Laravel/Infrastructure", "cpu_usage_active", "InstanceId", "AUTO"],
-          [".", "mem_used_percent", ".", "."],
-          [".", "disk_used_percent", ".", ".", "device", "/dev/xvda1"]
-        ],
-        "period": 300,
-        "stat": "Average",
-        "region": "ap-northeast-1",
-        "title": "System Metrics"
-      }
-    },
-    {
-      "type": "metric",
-      "properties": {
-        "metrics": [
-          ["Laravel/Application", "http_request_duration", "service.name", "laravel-app"],
-          [".", "db_query_duration", ".", "."],
-          [".", "cache_hit_ratio", ".", "."]
-        ],
-        "period": 300,
-        "stat": "Average",
-        "region": "ap-northeast-1",
-        "title": "Application Metrics"
-      }
-    },
-    {
-      "type": "log",
-      "properties": {
-        "query": "SOURCE '/aws/ec2/laravel/application' | fields @timestamp, level, message | filter level = 'ERROR' | sort @timestamp desc | limit 20",
-        "region": "ap-northeast-1",
-        "title": "Recent Errors"
-      }
-    }
-  ]
-}'
-```
-
-### 2. アラーム設定
-```bash
-# 高CPU使用率アラーム
-aws cloudwatch put-metric-alarm \
-    --alarm-name "Laravel-HighCPU" \
-    --alarm-description "High CPU usage detected" \
-    --metric-name "cpu_usage_active" \
-    --namespace "Laravel/Infrastructure" \
-    --statistic "Average" \
-    --period 300 \
-    --threshold 80 \
-    --comparison-operator "GreaterThanThreshold" \
-    --evaluation-periods 2 \
-    --alarm-actions "arn:aws:sns:ap-northeast-1:123456789012:alerts"
-
-# 高メモリ使用率アラーム
-aws cloudwatch put-metric-alarm \
-    --alarm-name "Laravel-HighMemory" \
-    --alarm-description "High memory usage detected" \
-    --metric-name "mem_used_percent" \
-    --namespace "Laravel/Infrastructure" \
-    --statistic "Average" \
-    --period 300 \
-    --threshold 85 \
-    --comparison-operator "GreaterThanThreshold" \
-    --evaluation-periods 2 \
-    --alarm-actions "arn:aws:sns:ap-northeast-1:123456789012:alerts"
-
-# アプリケーション応答時間アラーム
-aws cloudwatch put-metric-alarm \
-    --alarm-name "Laravel-SlowResponse" \
-    --alarm-description "Slow application response detected" \
-    --metric-name "http_request_duration" \
-    --namespace "Laravel/Application" \
-    --statistic "Average" \
-    --period 300 \
-    --threshold 2000 \
-    --comparison-operator "GreaterThanThreshold" \
-    --evaluation-periods 3 \
-    --alarm-actions "arn:aws:sns:ap-northeast-1:123456789012:alerts"
-```
-
-## 🔧 Laravel設定
-
-### 1. OpenTelemetry設定
-```bash
-# Laravel .env設定
-OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http/json
-OTEL_TRACES_ENABLED=true
-OTEL_METRICS_ENABLED=true
-OTEL_LOGS_ENABLED=true
-OTEL_SERVICE_NAME=laravel-app
-OTEL_SERVICE_VERSION=1.0.0
-OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production
-```
-
-### 2. カスタムメトリクス例
-```php
-// app/Http/Middleware/MetricsMiddleware.php
-<?php
-
-namespace App\Http\Middleware;
-
-use Closure;
-use Illuminate\Http\Request;
-use OpenTelemetry\API\Metrics\MeterProvider;
-
-class MetricsMiddleware
-{
-    private $meter;
-    private $httpRequestDuration;
-    private $httpRequestCount;
-
-    public function __construct()
-    {
-        $this->meter = MeterProvider::getMeter('laravel-app');
-        
-        $this->httpRequestDuration = $this->meter->createHistogram(
-            'http_request_duration',
-            'milliseconds',
-            'Duration of HTTP requests'
-        );
-        
-        $this->httpRequestCount = $this->meter->createCounter(
-            'http_requests_total',
-            'requests',
-            'Total number of HTTP requests'
-        );
-    }
-
-    public function handle(Request $request, Closure $next)
-    {
-        $startTime = microtime(true);
-        
-        $response = $next($request);
-        
-        $duration = (microtime(true) - $startTime) * 1000;
-        
-        $attributes = [
-            'method' => $request->method(),
-            'route' => $request->route()?->getName() ?? 'unknown',
-            'status_code' => $response->getStatusCode(),
-        ];
-        
-        $this->httpRequestDuration->record($duration, $attributes);
-        $this->httpRequestCount->add(1, $attributes);
-        
-        return $response;
-    }
-}
-```
-
-## 🔍 監視とトラブルシューティング
-
-### 1. 統合監視コマンド
-```bash
-#!/bin/bash
-# monitoring-check.sh - 統合監視スクリプト
-
-echo "🔍 Laravel OpenTelemetry 統合監視"
-echo "================================="
-
-# 1. サービス状態確認
-echo "1. サービス状態"
-services=("amazon-cloudwatch-agent" "otel-collector" "xray" "nginx" "php-fpm")
-for service in "${services[@]}"; do
-    if systemctl is-active --quiet "$service"; then
-        echo "✅ $service: Active"
-    else
-        echo "❌ $service: Inactive"
-    fi
-done
-
-# 2. メトリクス送信状況
-echo -e "\n2. メトリクス送信状況"
-echo "CloudWatch Agent メトリクス (最新5分間):"
-aws cloudwatch get-metric-statistics \
-    --namespace "Laravel/Infrastructure" \
-    --metric-name "cpu_usage_active" \
-    --start-time "$(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%S)" \
-    --end-time "$(date -u +%Y-%m-%dT%H:%M:%S)" \
-    --period 300 \
-    --statistics "Average" \
-    --query 'Datapoints[0].Average' \
-    --output text
-
-# 3. ログ送信状況
-echo -e "\n3. ログ送信状況"
-log_groups=("/aws/ec2/nginx/access" "/aws/ec2/nginx/error" "/aws/ec2/laravel/application")
-for log_group in "${log_groups[@]}"; do
-    if aws logs describe-log-groups --log-group-name-prefix "$log_group" --query 'logGroups[0].logGroupName' --output text >/dev/null 2>&1; then
-        echo "✅ $log_group: Active"
-    else
-        echo "❌ $log_group: Not Found"
-    fi
-done
-
-echo -e "\n✅ CloudWatch Dashboard: https://console.aws.amazon.com/cloudwatch/home?region=ap-northeast-1#dashboards:name=Laravel-OpenTelemetry-Dashboard"
-echo "✅ X-Ray Service Map: https://console.aws.amazon.com/xray/home?region=ap-northeast-1#/service-map"
-```
-
-### 2. パフォーマンス最適化
-```bash
-# CloudWatch Agentのメモリ使用量最適化
-sudo tee /opt/aws/amazon-cloudwatch-agent/etc/common-config.toml > /dev/null <<'EOF'
-[agent]
-  buffer_time = 10000
-  collection_jitter = "0s"
-  debug = false
-  flush_interval = "1s"
-  flush_jitter = "0s"
-  hostname = ""
-  interval = "10s"
-  logfile = ""
-  metric_batch_size = 1000
-  metric_buffer_limit = 10000
-  omit_hostname = false
-  precision = ""
-  quiet = false
-  round_interval = true
-EOF
-```
-
-### 3. トラブルシューティング用の自動修正スクリプト
-```bash
-#!/bin/bash
-# fix-cloudwatch-integration.sh
-
-echo "🔧 CloudWatch Agent統合問題修正スクリプト"
-echo "=========================================="
-
-# CloudWatch Agentのtraceセクション削除
-if sudo grep -q '"traces"' /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json 2>/dev/null; then
-    echo "⚠️  traceセクションを削除中..."
-    sudo jq 'del(.traces)' /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /tmp/cw-config.json
-    sudo cp /tmp/cw-config.json /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
-    sudo rm /tmp/cw-config.json
-    echo "✅ traceセクション削除完了"
-fi
-
-# サービス再起動
-echo "🔄 サービス再起動中..."
-sudo systemctl restart amazon-cloudwatch-agent
-sudo systemctl restart otel-collector
-
-echo "✅ 修正完了"
-```
-
-## 🎯 統合監視システムのメリット
-
-### 1. データフローの最適化
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    統合監視データフロー                                   │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Laravel App → OpenTelemetry Collector → StatsD → CloudWatch Agent      │
-│                                        → X-Ray                         │
-│                                        → CloudWatch Logs               │
-│                                                                         │
-│  System Metrics → CloudWatch Agent → CloudWatch Metrics               │
-│                                                                         │
-│  Log Files → CloudWatch Agent → CloudWatch Logs                       │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### 2. 役割分担の明確化
-| コンポーネント | 主な役割 | 送信先 |
-|----------------|----------|--------|
-| **CloudWatch Agent** | システムメトリクス収集 + ログ収集 + StatsD受信 | CloudWatch Metrics/Logs |
-| **OpenTelemetry Collector** | アプリケーション監視 + メトリクス変換 + トレース処理 | X-Ray + CloudWatch (StatsD経由) |
-| **X-Ray Daemon** | トレース受信 + 分散トレーシング | X-Ray Service |
-
-### 3. 統合の利点
-
-#### パフォーマンス面
-- **メトリクス重複の排除**: 同じメトリクスの二重収集を避ける
-- **ネットワーク負荷軽減**: StatsD経由で効率的なメトリクス送信
-- **リソース使用量最適化**: 各コンポーネントの専門化
-
-#### 運用面
-- **一元管理**: CloudWatch Agentを中心とした統合管理
-- **設定の簡素化**: 各コンポーネントの設定が明確に分離
-- **トラブルシューティング**: 問題の所在が特定しやすい
-
-#### コスト面
-- **CloudWatch API呼び出し削減**: StatsD経由でバッチ送信
-- **データ転送量最適化**: 効率的なメトリクス集約
-- **運用コスト削減**: 自動化されたスクリプトによる管理
-
-### 4. 監視カバレッジ
-
-#### インフラストラクチャ層
-- **CloudWatch Agent**: CPU、メモリ、ディスク、ネットワーク
-- **プロセス監視**: Nginx、PHP-FPM、OpenTelemetry Collectorの詳細メトリクス
-- **システムログ**: OS、アプリケーション、エラーログ
-
-#### アプリケーション層
-- **OpenTelemetry Collector**: HTTPリクエスト、データベースクエリ、カスタムメトリクス
-- **分散トレーシング**: X-Ray経由でリクエストフローの可視化
-- **構造化ログ**: アプリケーションの詳細ログ
-
-#### 統合ダッシュボード
-- **CloudWatch Dashboard**: システム全体の統一された可視化
-- **X-Ray Service Map**: 分散システムの依存関係マップ
-- **CloudWatch Insights**: ログとメトリクスの高度な分析
-
-### 5. ベストプラクティス
-
-#### 設定管理
-```bash
-# 設定ファイルのバージョン管理
-sudo cp /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json \
-       /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json.$(date +%Y%m%d_%H%M%S)
-
-sudo cp /etc/otel-collector/config.yaml \
-       /etc/otel-collector/config.yaml.$(date +%Y%m%d_%H%M%S)
-```
-
-#### 監視・アラート
-```bash
-# 統合ヘルスチェック
-curl -s http://localhost:13133/ | jq .
-aws cloudwatch get-metric-statistics --namespace "Laravel/Infrastructure" --metric-name "cpu_usage_active" --start-time "$(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%S)" --end-time "$(date -u +%Y-%m-%dT%H:%M:%S)" --period 300 --statistics "Average"
-```
-
-#### セキュリティ
-```bash
-# ポート制限（内部通信のみ）
-sudo ufw allow from 127.0.0.1 to any port 8125  # StatsD
-sudo ufw allow from 127.0.0.1 to any port 4317  # OpenTelemetry gRPC
-sudo ufw allow from 127.0.0.1 to any port 4318  # OpenTelemetry HTTP
-```
-
-## 🎯 まとめ
-
-この統合設定により、以下の包括的な監視が実現できます：
-
-### CloudWatch Agentが収集するメトリクス
-- **システムメトリクス**: CPU、メモリ、ディスク、ネットワーク
-- **プロセスメトリクス**: Nginx、PHP-FPM、OpenTelemetry Collectorの詳細
-- **ログ**: アプリケーション、システム、エラーログ
-- **StatsD受信**: OpenTelemetry Collectorからのメトリクス統合
-
-### OpenTelemetry Collectorが収集するデータ
-- **分散トレーシング**: リクエストフロー、レスポンス時間
-- **アプリケーションメトリクス**: HTTPリクエスト、データベースクエリ
-- **カスタムメトリクス**: ビジネスロジック固有の指標
-- **メトリクス変換**: CloudWatch Agent向けStatsD変換
-
-### 監視の利点
-- **統一ダッシュボード**: CloudWatchでシステム全体を可視化
-- **プロアクティブアラート**: 問題発生前の早期警告
-- **根本原因分析**: トレースとメトリクスの組み合わせによる詳細分析
-- **運用効率化**: 自動化されたスクリプトによる問題解決
-- **コスト最適化**: 効率的なメトリクス送信とAPI呼び出し削減 
