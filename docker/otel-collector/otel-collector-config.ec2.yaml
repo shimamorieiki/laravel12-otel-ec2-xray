@@ -26,11 +26,12 @@ processors:
 
   memory_limiter:
     limit_mib: 256
+    check_interval: 1s
 
 exporters:
   # Console exporter for debugging
-  logging:
-    loglevel: info
+  debug: # otelcol-contrib version 0.129.0ではdebug, 0.91.0ではlogging
+    verbosity: normal
 
   # AWS X-Ray exporter via X-Ray daemon
   awsxray:
@@ -41,7 +42,7 @@ exporters:
     index_all_attributes: true
 
   # CloudWatch metrics exporter
-  awscloudwatchmetrics:
+  awsemf:
     region: ap-northeast-1
     namespace: Laravel/OpenTelemetry
     dimension_rollup_option: NoDimensionRollup
@@ -72,12 +73,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch, resource]
-      exporters: [logging, awsxray]
+      exporters: [debub, awsxray] # otelcol-contrib version 0.129.0ではdebug, 0.91.0ではlogging
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch, resource]
-      exporters: [logging, awscloudwatchmetrics]
+      exporters: [debug, awsemf] # otelcol-contrib version 0.129.0ではdebug, 0.91.0ではlogging
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch, resource]
-      exporters: [logging]
+      exporters: [debug] # otelcol-contrib version 0.129.0ではdebug, 0.91.0ではlogging
