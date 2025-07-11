@@ -65,8 +65,59 @@
       "files": {
         "collect_list": [
           {
+            "file_path": "/var/log/nginx/access.log",
+            "log_group_name": "/aws/ec2/nginx/access",
+            "log_stream_name": "{instance_id}-{hostname}",
+            "timezone": "UTC",
+            "timestamp_format": "%d/%b/%Y:%H:%M:%S %z"
+          },
+          {
+            "file_path": "/var/log/nginx/error.log",
+            "log_group_name": "/aws/ec2/nginx/error",
+            "log_stream_name": "{instance_id}-{hostname}",
+            "timezone": "UTC"
+          },
+          {
+            "file_path": "/var/log/nginx/laravel_access.log",
+            "log_group_name": "/aws/ec2/laravel/access",
+            "log_stream_name": "{instance_id}-{hostname}",
+            "timezone": "UTC",
+            "timestamp_format": "%d/%b/%Y:%H:%M:%S %z"
+          },
+          {
+            "file_path": "/var/log/nginx/laravel_error.log",
+            "log_group_name": "/aws/ec2/laravel/error",
+            "log_stream_name": "{instance_id}-{hostname}",
+            "timezone": "UTC"
+          },
+          {
+            "file_path": "/var/log/php-fpm/error.log",
+            "log_group_name": "/aws/ec2/php-fpm/error",
+            "log_stream_name": "{instance_id}-{hostname}",
+            "timezone": "UTC"
+          },
+          {
+            "file_path": "/var/log/php-fpm/www-error.log",
+            "log_group_name": "/aws/ec2/php-fpm/www-error",
+            "log_stream_name": "{instance_id}-{hostname}",
+            "timezone": "UTC"
+          },
+          {
+            "file_path": "/var/www/html/laravel12-otel-ec2-xray/storage/logs/laravel.log",
+            "log_group_name": "/aws/ec2/laravel/application",
+            "log_stream_name": "{instance_id}-{hostname}",
+            "timezone": "UTC",
+            "timestamp_format": "[%Y-%m-%d %H:%M:%S]"
+          },
+          {
             "file_path": "/var/log/messages",
             "log_group_name": "/aws/ec2/system/messages",
+            "log_stream_name": "{instance_id}-{hostname}",
+            "timezone": "UTC"
+          },
+          {
+            "file_path": "/var/log/secure",
+            "log_group_name": "/aws/ec2/system/secure",
             "log_stream_name": "{instance_id}-{hostname}",
             "timezone": "UTC"
           }
