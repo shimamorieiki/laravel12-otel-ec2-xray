@@ -1,0 +1,84 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+    send_batch_max_size: 1024
+
+  resource:
+    attributes:
+      - key: service.name
+        value: laravel-app
+        action: upsert
+      - key: service.version
+        value: "1.0.0"
+        action: upsert
+      - key: deployment.environment
+        value: production
+        action: upsert
+
+  memory_limiter:
+    limit_mib: 256
+    check_interval: 1s
+
+exporters:
+  # Console exporter for debugging
+  debug: # otelcol-contrib version 0.129.0ではdebug, 0.91.0ではlogging
+    verbosity: normal
+
+  # AWS X-Ray exporter via X-Ray daemon
+  awsxray:
+    endpoint: http://127.0.0.1:2000
+    local_mode: true
+    region: ap-northeast-1
+    no_verify_ssl: false
+    index_all_attributes: true
+
+  # CloudWatch metrics exporter
+  awsemf:
+    region: ap-northeast-1
+    namespace: Laravel/OpenTelemetry
+    dimension_rollup_option: NoDimensionRollup
+    metric_declarations:
+      - dimensions: [[service.name], [service.name, deployment.environment]]
+        metric_name_selectors:
+          - ".*"
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: /health
+
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: basic
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [debub, awsxray] # otelcol-contrib version 0.129.0ではdebug, 0.91.0ではlogging
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [debug, awsemf] # otelcol-contrib version 0.129.0ではdebug, 0.91.0ではlogging
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [debug] # otelcol-contrib version 0.129.0ではdebug, 0.91.0ではlogging
